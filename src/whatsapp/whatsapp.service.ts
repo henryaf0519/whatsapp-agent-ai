@@ -1,11 +1,18 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
-import { config as dotenvConfig } from 'dotenv';
-dotenvConfig();
+
 @Injectable()
 export class WhatsappService {
-  private readonly whatsappApiUrl = process.env.WHATSAPP_API_URL || '';
-  private readonly whatsappToken = process.env.WHATSAPP_API_TOKEN || '';
+  private readonly whatsappApiUrl: string;
+  private readonly whatsappToken: string;
+
+  constructor(private readonly configService: ConfigService) {
+    this.whatsappApiUrl =
+      this.configService.get<string>('WHATSAPP_API_URL') || '';
+    this.whatsappToken =
+      this.configService.get<string>('WHATSAPP_API_TOKEN') || '';
+  }
 
   async sendMessage(to: string, message: string): Promise<unknown> {
     const body = {
@@ -14,6 +21,7 @@ export class WhatsappService {
       text: { body: message },
     };
 
+    // El resto del código funciona como estaba.
     const response = await axios.post(this.whatsappApiUrl, body, {
       headers: {
         Authorization: `Bearer ${this.whatsappToken}`,
@@ -21,6 +29,6 @@ export class WhatsappService {
       },
     });
 
-    return response.data as unknown;
+    return response.data;
   }
 }
