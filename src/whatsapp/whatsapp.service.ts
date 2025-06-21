@@ -1,11 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import axios from 'axios';
-
+import { config as dotenvConfig } from 'dotenv';
+dotenvConfig();
 @Injectable()
 export class WhatsappService {
-  private readonly whatsappApiUrl = `https://graph.facebook.com/v22.0/647491045122813/messages`;
-  private readonly whatsappToken =
-    'EAAIBSmxQ3OwBO63SxQow2cd9tGWhT90bR2g1sd3wriOUG845sHKEHGRH578eTE9ZBOEiv8K4g9Vb6ee96OIStydmKYjslzeLN8vLoCJAqJ9ez8ukSRgdqf02oPsnEuq7X0svXiGTtZADjAzNrZBCTveZAmPkpc2yoCcjjUkS4JpcMyBrl6L2czZAAdXW6Yi6M65G1vNT787Y6cC9ME1QR8VhsDiCcDjxKLnPZCJDPw9vXJ2AZDZD';
+  private readonly whatsappApiUrl = process.env.WHATSAPP_API_URL || '';
+  private readonly whatsappToken = process.env.WHATSAPP_TOKEN || '';
 
   async sendMessage(to: string, body: string): Promise<any> {
     const message = {
