@@ -1,5 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 import { Injectable } from '@nestjs/common';
+import { config as dotenvConfig } from 'dotenv';
+dotenvConfig();
 import { OpenAI } from 'openai';
 
 @Injectable()
@@ -8,7 +10,7 @@ export class OpenaiService {
 
   constructor() {
     this.openai = new OpenAI({
-      apiKey: '',
+      apiKey: process.env.OPENAI_API_KEY,
     });
   }
 
