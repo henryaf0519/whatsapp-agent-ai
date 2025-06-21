@@ -5,30 +5,22 @@ dotenvConfig();
 @Injectable()
 export class WhatsappService {
   private readonly whatsappApiUrl = process.env.WHATSAPP_API_URL || '';
-  private readonly whatsappToken = process.env.WHATSAPP_TOKEN || '';
+  private readonly whatsappToken = process.env.WHATSAPP_API_TOKEN || '';
 
-  async sendMessage(to: string, body: string): Promise<any> {
-    const message = {
+  async sendMessage(to: string, message: string): Promise<unknown> {
+    const body = {
       messaging_product: 'whatsapp',
       to,
-      text: { body },
+      text: { body: message },
     };
-    console.log('Enviando mensaje a WhatsApp:', message);
-    try {
-      const response = await axios.post(this.whatsappApiUrl, message, {
-        headers: {
-          Authorization: `Bearer ${this.whatsappToken}`,
-          'Content-Type': 'application/json',
-        },
-      });
-      return response.data;
-    } catch (error) {
-      const err = error as { response?: { data?: any }; message?: string };
-      console.error(
-        'Error al enviar el mensaje:',
-        err.response?.data || err.message,
-      );
-      throw new Error('Error al enviar mensaje a WhatsApp');
-    }
+
+    const response = await axios.post(this.whatsappApiUrl, body, {
+      headers: {
+        Authorization: `Bearer ${this.whatsappToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    return response.data as unknown;
   }
 }

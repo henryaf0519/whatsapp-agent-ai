@@ -1,5 +1,7 @@
 import { Controller, Post, Body, Req, Res, Get } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { OpenaiService } from '../openai/openai.service';
+import { WhatsappService } from '../whatsapp/whatsapp.service'; // Importar el servicio de WhatsApp si es necesario
 
 interface WhatsAppMessage {
   object: string;
@@ -22,13 +24,17 @@ interface WhatsAppMessage {
 
 @Controller('whatsapp')
 export class WhatsappWebhookController {
+  constructor(
+    private readonly openAIService: OpenaiService,
+    private readonly whatsappService: WhatsappService, // Importar el servicio de WhatsApp si es necesario
+  ) {}
+
   @Get('webhook')
   verifyWebhook(@Req() req: Request, @Res() res: Response) {
     const VERIFY_TOKEN = '123456';
     const mode = req.query['hub.mode'];
     const token = req.query['hub.verify_token'];
     const challenge = req.query['hub.challenge'];
-    console.log('Verifying webhook:', { mode, token, challenge });
     if (mode && token === VERIFY_TOKEN) {
       res.status(200).send(challenge);
     } else {
@@ -37,35 +43,36 @@ export class WhatsappWebhookController {
   }
 
   @Post('webhook')
-  receiveMessage(@Req() req: Request, @Res() res: Response) {
+  async receiveMessage(@Req() req: Request, @Res() res: Response) {
     try {
       const messageData: WhatsAppMessage = req.body;
 
-      if (
-        !messageData ||
-        !Array.isArray(messageData.entry) ||
-        messageData.entry.length === 0 ||
-        !messageData.entry[0].changes ||
-        !Array.isArray(messageData.entry[0].changes) ||
-        messageData.entry[0].changes.length === 0
-      ) {
-        console.error('Invalid message structure:', messageData);
-        return res.status(400).json({ error: 'Invalid message structure' });
-      }
+      // Verificar que la estructura del mensaje es válida
+      const entry = messageData.entry?.[0];
+      const changes = entry?.changes?.[0];
+      const messages = changes?.value?.messages;
 
-      const messages = messageData.entry[0].changes[0].value.messages;
-      if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      if (!messages || messages.length === 0) {
         console.error('No messages found:', messageData);
         return res.status(400).json({ error: 'No messages found' });
       }
 
       const message = messages[0];
-      if (!message.from || !message.text || !message.text.body) {
+      const { from, text } = message;
+
+      if (!from || !text?.body) {
         console.error('Incomplete message data:', message);
         return res.status(400).json({ error: 'Incomplete message data' });
       }
 
-      console.log(`Mensaje recibido de ${message.from}: ${message.text.body}`);
+      console.log(`Mensaje recibido de ${from}: ${text.body}`);
+
+      // Obtener la respuesta de la IA
+      const aiResponse = await this.openAIService.getAIResponse(text.body);
+
+      // Enviar la respuesta al número de WhatsApp
+      await this.whatsappService.sendMessage(from, aiResponse);
+
       return res.status(200).send('EVENT_RECEIVED');
     } catch (error) {
       console.error('Error processing message:', error);
