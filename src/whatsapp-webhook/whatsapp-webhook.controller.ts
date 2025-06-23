@@ -3,12 +3,7 @@ import { Request, Response } from 'express';
 import { OpenaiService } from '../openai/openai.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import chalk from 'chalk';
-
-// Interfaz para el historial de chat (DEBE ESTAR DEFINIDA EN ESTE ARCHIVO TAMBIÉN)
-interface ChatMessage {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-}
+import { ChatMessage } from '../common/interfaces/chat-message';
 
 // Interfaz para el payload del webhook de WhatsApp (tu definición existente)
 interface WhatsAppMessagePayload {

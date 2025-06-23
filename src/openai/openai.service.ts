@@ -2,14 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { ChatCompletionTool } from 'openai/resources/chat/completions';
+import { ChatMessage } from '../common/interfaces/chat-message';
 import { tools } from './prompts/tools';
 import { systemPrompt } from './prompts/system-prompt';
 
-// Interfaz para el historial de chat (útil en ambos servicios)
-interface ChatMessage {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-}
 
 @Injectable()
 export class OpenaiService {
