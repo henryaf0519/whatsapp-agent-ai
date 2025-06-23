@@ -197,7 +197,9 @@ export class WhatsappWebhookController {
 
   @Get('webhook')
   verifyWebhook(@Req() req: Request, @Res() res: Response) {
-    const VERIFY_TOKEN = this.configService.get<string>('WHATSAPP_VERIFY_TOKEN');
+    const VERIFY_TOKEN = this.configService.get<string>(
+      'WHATSAPP_VERIFY_TOKEN',
+    );
     const mode = req.query['hub.mode'];
     const token = req.query['hub.verify_token'];
     const challenge = req.query['hub.challenge'];
