@@ -9,7 +9,9 @@ describe('WhatsappWebhookController', () => {
       controllers: [WhatsappWebhookController],
     }).compile();
 
-    controller = module.get<WhatsappWebhookController>(WhatsappWebhookController);
+    controller = module.get<WhatsappWebhookController>(
+      WhatsappWebhookController,
+    );
   });
 
   it('should be defined', () => {
