@@ -1,4 +1,5 @@
 import { Controller, Post, Body, Req, Res, Get } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Request, Response } from 'express';
 import { OpenaiService } from '../openai/openai.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
@@ -78,6 +79,7 @@ export class WhatsappWebhookController {
   constructor(
     private readonly openAIService: OpenaiService,
     private readonly whatsappService: WhatsappService,
+    private readonly configService: ConfigService,
   ) {}
 
   // Propiedades para la deduplicación en memoria
@@ -90,7 +92,7 @@ export class WhatsappWebhookController {
 
   @Get('webhook')
   verifyWebhook(@Req() req: Request, @Res() res: Response) {
-    const VERIFY_TOKEN = '123456';
+    const VERIFY_TOKEN = this.configService.get<string>('WHATSAPP_VERIFY_TOKEN');
     const mode = req.query['hub.mode'];
     const token = req.query['hub.verify_token'];
     const challenge = req.query['hub.challenge'];
