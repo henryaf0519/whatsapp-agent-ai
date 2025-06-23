@@ -38,7 +38,7 @@ export class CalendarService {
     return response.data;
   }
 
-  async getEvents(date: string): Promise<any[]> {
+  async getEvents(date: string): Promise<unknown[]> {
     const timeMin = new Date(`${date}T00:00:00Z`).toISOString();
     const timeMax = new Date(`${date}T23:59:59Z`).toISOString();
     const url = `${this.baseUrl}/calendars/${this.calendarId}/events`;
@@ -51,6 +51,7 @@ export class CalendarService {
       },
       headers: { Authorization: `Bearer ${this.token}` },
     });
-    return response.data.items || [];
+    const data = response.data as { items?: unknown[] };
+    return data.items || [];
   }
 }

@@ -180,7 +180,11 @@ export class WhatsappWebhookController {
             whatsappReply = 'No hay eventos programados para la fecha solicitada.';
           } else {
             const items = events
-              .map((e: any) => `${e.start.dateTime || e.start.date} - ${e.summary}`)
+              .map(
+                (e: any) =>
+                  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+                  `${e.start.dateTime || e.start.date} - ${e.summary}`,
+              )
               .join('\n');
             whatsappReply = `Eventos para ${calendarGetArgs.date || 'hoy'}:\n${items}`;
           }
