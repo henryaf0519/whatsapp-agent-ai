@@ -5,18 +5,12 @@ import { ChatCompletionTool } from 'openai/resources/chat/completions';
 import { ChatMessage } from '../common/interfaces/chat-message';
 import { tools } from './prompts/tools';
 import { systemPrompt } from './prompts/system-prompt';
-
-
 @Injectable()
 export class OpenaiService {
   private readonly openai: OpenAI;
   private readonly model: string;
   private readonly logger = new Logger(OpenaiService.name);
-
-  // --- DEFINICIONES DE HERRAMIENTAS EN FORMATO OPENAI ---
   private readonly tools: ChatCompletionTool[] = tools;
-
-  // --- PROMPT DE SISTEMA ---
   private readonly systemPrompt: string = systemPrompt;
 
   constructor(private readonly configService: ConfigService) {
@@ -35,8 +29,6 @@ export class OpenaiService {
 
   async getAIResponse(
     userMessage: string,
-    // La interfaz ChatMessage debe estar disponible aquí.
-    // Si no está global o importada, dará error.
     chatHistory: ChatMessage[],
   ): Promise<string | object> {
     try {
