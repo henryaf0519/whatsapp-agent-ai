@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { google } from 'googleapis';
-import { OAuth2Client } from 'google-auth-library';
+import { OAuth2Client } from 'googleapis/node_modules/google-auth-library';
 
 @Injectable()
 export class EmailService {
@@ -29,6 +29,12 @@ export class EmailService {
     body: string,
     recipientName?: string,
   ): Promise<unknown> {
+    console.log('Sending email:', {
+      recipient,
+      subject,
+      body,
+      recipientName,
+    });
     const greeting = recipientName ? `Dear ${recipientName},\n\n` : '';
     const message =
       `From: ${this.fromEmail}\r\n` +
@@ -44,11 +50,49 @@ export class EmailService {
       .replace(/=+$/, '');
 
     const gmail = google.gmail({ version: 'v1', auth: this.oauth2Client });
-    const response = await gmail.users.messages.send({
-      userId: 'me',
-      requestBody: { raw: encodedMessage },
-    });
-
-    return response.data;
+    try {
+      const response = await gmail.users.messages.send({
+        userId: 'me',
+        requestBody: { raw: encodedMessage },
+      });
+      console.log('Email sent successfully:', response.data);
+      return response.data;
+    } catch (error: unknown) {
+      if (error && typeof error === 'object' && 'message' in error) {
+        console.error(
+          'Error sending email:',
+          (error as { message: unknown }).message,
+        );
+      } else {
+        console.error('Error sending email:', error);
+      }
+      // 2) Muestra el cuerpo de respuesta de Google (status + data)
+      if (
+        error &&
+        typeof error === 'object' &&
+        'response' in error &&
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        (error as any).response
+      ) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        console.error('→ Status:', (error as any).response.status);
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        console.error('→ Response data:', (error as any).response.data);
+      }
+      // 3) Muestra TODO el objeto de error (útil para Gaxios)
+      if (
+        error &&
+        typeof error === 'object' &&
+        'toJSON' in error &&
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        typeof (error as any).toJSON === 'function'
+      ) {
+        console.error(
+          'Full error (JSON):',
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+          JSON.stringify((error as any).toJSON(), null, 2),
+        );
+      }
+    }
   }
 }

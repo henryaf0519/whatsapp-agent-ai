@@ -177,7 +177,8 @@ export class WhatsappWebhookController {
             calendarGetArgs.date || new Date().toISOString().slice(0, 10),
           );
           if (events.length === 0) {
-            whatsappReply = 'No hay eventos programados para la fecha solicitada.';
+            whatsappReply =
+              'No hay eventos programados para la fecha solicitada.';
           } else {
             const items = events
               .map(
