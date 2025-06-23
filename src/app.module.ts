@@ -6,6 +6,8 @@ import { WhatsappService } from './whatsapp/whatsapp.service';
 import { OpenaiService } from './openai/openai.service';
 import { WhatsappWebhookController } from './whatsapp-webhook/whatsapp-webhook.controller';
 import { ConfigModule } from '@nestjs/config';
+import { EmailService } from './email/email.service';
+import { CalendarService } from './calendar/calendar.service';
 
 @Module({
   imports: [
@@ -14,6 +16,12 @@ import { ConfigModule } from '@nestjs/config';
     }),
   ],
   controllers: [AppController, WhatsappController, WhatsappWebhookController],
-  providers: [AppService, WhatsappService, OpenaiService],
+  providers: [
+    AppService,
+    WhatsappService,
+    OpenaiService,
+    EmailService,
+    CalendarService,
+  ],
 })
 export class AppModule {}
