@@ -3,6 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { Request, Response } from 'express';
 import { OpenaiService } from '../openai/openai.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
+import { EmailService } from '../email/email.service';
+import { CalendarService } from '../calendar/calendar.service';
 import chalk from 'chalk';
 import { ChatMessage } from '../common/interfaces/chat-message';
 
@@ -75,6 +77,8 @@ export class WhatsappWebhookController {
     private readonly openAIService: OpenaiService,
     private readonly whatsappService: WhatsappService,
     private readonly configService: ConfigService,
+    private readonly emailService: EmailService,
+    private readonly calendarService: CalendarService,
   ) {}
 
   // Propiedades para la deduplicación en memoria
@@ -148,19 +152,41 @@ export class WhatsappWebhookController {
         let whatsappReply = '';
         if (toolName === 'Gmail_Send') {
           const gmailArgs = toolArgs as GmailSendArgs;
+          await this.emailService.sendEmail(
+            gmailArgs.recipient,
+            gmailArgs.subject,
+            gmailArgs.body,
+            gmailArgs.recipient_name,
+          );
           const recipientDisplay = gmailArgs.recipient_name
             ? `${gmailArgs.recipient_name} (${gmailArgs.recipient})`
             : gmailArgs.recipient;
-          whatsappReply = `¡Excelente! He preparado el correo para ${recipientDisplay} con el asunto "${gmailArgs.subject}". Se enviará con el siguiente contenido:\n\n---\n${gmailArgs.body}\n---.\n\nRecuerda que esta es una simulación. Para el envío real, deberías integrar la API de Gmail aquí.`;
+          whatsappReply = `Correo enviado a ${recipientDisplay} con asunto "${gmailArgs.subject}".`;
         } else if (toolName === 'Calendar_Set') {
           const calendarSetArgs = toolArgs as CalendarSetArgs;
-          whatsappReply = `¡Listo! He simulado la programación de "${calendarSetArgs.title}" para el ${calendarSetArgs.date} a las ${calendarSetArgs.time}.`;
+          await this.calendarService.createEvent(
+            calendarSetArgs.date,
+            calendarSetArgs.time,
+            calendarSetArgs.title,
+            calendarSetArgs.duration_minutes,
+          );
+          whatsappReply = `Evento "${calendarSetArgs.title}" programado para el ${calendarSetArgs.date} a las ${calendarSetArgs.time}.`;
         } else if (toolName === 'Calendar_Get') {
           const calendarGetArgs = toolArgs as CalendarGetArgs;
-          whatsappReply = `Simulando la consulta del calendario para ${calendarGetArgs.date || 'hoy'}.`;
+          const events = await this.calendarService.getEvents(
+            calendarGetArgs.date || new Date().toISOString().slice(0, 10),
+          );
+          if (events.length === 0) {
+            whatsappReply = 'No hay eventos programados para la fecha solicitada.';
+          } else {
+            const items = events
+              .map((e: any) => `${e.start.dateTime || e.start.date} - ${e.summary}`)
+              .join('\n');
+            whatsappReply = `Eventos para ${calendarGetArgs.date || 'hoy'}:\n${items}`;
+          }
         } else {
           whatsappReply =
-            'Lo siento, la IA me dio una instrucción de herramienta que no reconozco en esta simulación.';
+            'Lo siento, la IA me dio una instrucción de herramienta que no reconozco.';
         }
 
         await this.whatsappService.sendMessage(from, whatsappReply);
