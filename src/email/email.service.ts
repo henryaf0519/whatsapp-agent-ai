@@ -1,17 +1,26 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import axios from 'axios';
+import { google } from 'googleapis';
+import { OAuth2Client } from 'google-auth-library';
 
 @Injectable()
 export class EmailService {
-  private readonly gmailToken: string;
   private readonly fromEmail: string;
-  private readonly gmailApiUrl =
-    'https://gmail.googleapis.com/gmail/v1/users/me/messages/send';
+  private readonly oauth2Client: OAuth2Client;
 
   constructor(private readonly configService: ConfigService) {
-    this.gmailToken = this.configService.get<string>('GMAIL_ACCESS_TOKEN') || '';
+    const clientId = this.configService.get<string>('GMAIL_CLIENT_ID');
+    const clientSecret = this.configService.get<string>('GMAIL_CLIENT_SECRET');
+    const refreshToken = this.configService.get<string>('GMAIL_REFRESH_TOKEN');
+    const redirectUri = this.configService.get<string>('GMAIL_REDIRECT_URI');
     this.fromEmail = this.configService.get<string>('GMAIL_FROM_EMAIL') || '';
+
+    if (!clientId || !clientSecret || !refreshToken || !redirectUri) {
+      throw new Error('Missing Gmail OAuth2 credentials');
+    }
+
+    this.oauth2Client = new OAuth2Client(clientId, clientSecret, redirectUri);
+    this.oauth2Client.setCredentials({ refresh_token: refreshToken });
   }
 
   async sendEmail(
@@ -34,16 +43,11 @@ export class EmailService {
       .replace(/\//g, '_')
       .replace(/=+$/, '');
 
-    const response = await axios.post(
-      this.gmailApiUrl,
-      { raw: encodedMessage },
-      {
-        headers: {
-          Authorization: `Bearer ${this.gmailToken}`,
-          'Content-Type': 'application/json',
-        },
-      },
-    );
+    const gmail = google.gmail({ version: 'v1', auth: this.oauth2Client });
+    const response = await gmail.users.messages.send({
+      userId: 'me',
+      requestBody: { raw: encodedMessage },
+    });
 
     return response.data;
   }
