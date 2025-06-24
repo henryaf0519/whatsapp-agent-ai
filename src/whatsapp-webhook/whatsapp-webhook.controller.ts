@@ -60,10 +60,7 @@ interface CalendarSetArgs {
   time: string;
   title: string;
   duration_minutes?: number;
-}
-
-interface CalendarGetArgs {
-  date?: string;
+  attendees?: string[];
 }
 
 interface ToolCallObject {
@@ -164,15 +161,17 @@ export class WhatsappWebhookController {
           whatsappReply = `Correo enviado a ${recipientDisplay} con asunto "${gmailArgs.subject}".`;
         } else if (toolName === 'Calendar_Set') {
           const calendarSetArgs = toolArgs as CalendarSetArgs;
+          console.log('In: Calendar_Set', calendarSetArgs);
           await this.calendarService.createEvent(
             calendarSetArgs.date,
             calendarSetArgs.time,
             calendarSetArgs.title,
-            calendarSetArgs.duration_minutes,
+            calendarSetArgs.duration_minutes || 60,
+            calendarSetArgs.attendees || [],
           );
           whatsappReply = `Evento "${calendarSetArgs.title}" programado para el ${calendarSetArgs.date} a las ${calendarSetArgs.time}.`;
         } else if (toolName === 'Calendar_Get') {
-          const calendarGetArgs = toolArgs as CalendarGetArgs;
+          /* const calendarGetArgs = toolArgs as CalendarGetArgs;
           const events = await this.calendarService.getEvents(
             calendarGetArgs.date || new Date().toISOString().slice(0, 10),
           );
@@ -188,7 +187,7 @@ export class WhatsappWebhookController {
               )
               .join('\n');
             whatsappReply = `Eventos para ${calendarGetArgs.date || 'hoy'}:\n${items}`;
-          }
+          }*/
         } else {
           whatsappReply =
             'Lo siento, la IA me dio una instrucción de herramienta que no reconozco.';
