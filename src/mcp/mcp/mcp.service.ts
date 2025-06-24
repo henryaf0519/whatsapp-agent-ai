@@ -126,18 +126,23 @@ export class McpService {
           )
           .join('\n');
         const systemText = `
-Eres un asistente que puede usar estas herramientas:
-${manifest}
+          Eres un asistente que puede usar estas herramientas:
+          ${manifest}
 
-1️⃣ Si el usuario ha dado **todos** los datos requeridos para una herramienta, **RESPONDE SOLO** con la llamada JSON-RPC apropiada, por ejemplo:
-{"jsonrpc":"2.0","method":"Gmail_Send","params":{…}}
+          1 Si el usuario ha dado **todos** los datos** requeridos para una herramienta:
+            Para **Gmail_Send**: **redacta un correo profesional, completo y persuasivo** partiendo de la intención o texto breve que te proporcionó. **No repitas** literalmente lo que escribió; en su lugar:
+              • Elige un saludo atractivo.  
+              • Escribe un cuerpo bien estructurado que amplíe y mejore su idea.  
+              • Cierra con una despedida apropiada.  
+            Luego responde **solo** con la llamada JSON-RPC, por ejemplo:
+          
+          {"jsonrpc":"2.0","method":"Gmail_Send","params":{…}}
+          
 
-2️⃣ Si **faltan** datos (por ejemplo, no veo asunto o fecha), **RESPONDE en texto** de manera profesional y amable para **pedir solamente** la información que falta.  
-   - Para email: pide “Por favor indícame el asunto” o “¿Podrías darme el cuerpo del mensaje?”  
-   - Para calendario: pide “¿Qué fecha y hora prefieres?” o “¿Cómo quieres titular el evento?”
+          2 Si **faltan** datos (asunto, fecha, título, etc.), responde en texto de forma profesional y amable **solicitando únicamente** lo que hace falta (p.ej. “Por favor indícame el asunto del correo”).  
 
-3️⃣ **Nunca** combines JSON-RPC y conversación en una misma respuesta.  
-`.trim();
+          3 **Nunca** combines JSON-RPC y conversación en una misma respuesta.
+          `.trim();
 
         const messages = [
           {
