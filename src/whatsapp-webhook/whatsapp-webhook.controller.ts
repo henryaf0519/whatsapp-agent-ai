@@ -1,3 +1,4 @@
+// src/whatsapp/whatsapp-webhook.controller.ts
 import { Controller, Post, Req, Res, Get } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Request, Response } from 'express';
@@ -12,26 +13,11 @@ interface WhatsAppMessagePayload {
     id: string;
     changes: Array<{
       value: {
-        statuses?: Array<{
-          id: string;
-          status: string;
-          timestamp: string;
-          recipient_id: string;
-          conversation?: any;
-          pricing?: {
-            billable: boolean;
-            pricing_model: string;
-            category: string;
-          };
-        }>;
         messages?: Array<{
           from: string;
           id: string;
-          timestamp: string;
-          type: string;
           text?: { body: string };
         }>;
-        metadata?: { display_phone_number: string; phone_number_id: string };
       };
       field: string;
     }>;
@@ -59,27 +45,28 @@ export class WhatsappWebhookController {
     return false;
   }
 
+  // Mantiene el historial por usuario
   private conversationHistory = new Map<string, ChatMessage[]>();
   private readonly MAX_CHAT_HISTORY_LENGTH = 10;
 
-  private async processIncomingMessage(
-    from: string,
-    textBody: string,
-  ): Promise<void> {
-    console.log(chalk.blue(`[Recibido] Mensaje de ${from}: ${textBody}`));
+  private async processIncomingMessage(from: string, textBody: string) {
+    console.log(chalk.blue(`[Recibido] ${from}: ${textBody}`));
 
-    // Guarda en el historial (opcional)
-    const history = this.conversationHistory.get(from) || [];
+    // 1) Recuperar y actualizar historial
+    const history = this.conversationHistory.get(from) ?? [];
     history.push({ role: 'user', content: textBody });
+    if (history.length > this.MAX_CHAT_HISTORY_LENGTH) {
+      history.splice(0, history.length - this.MAX_CHAT_HISTORY_LENGTH);
+    }
 
-    // Aquí solo llamamos a MCP → OpenAI → Tool y recibimos texto listo
-    const replyText = await this.openAIService.getAIResponse(textBody);
+    // 2) Llamar a OpenaiService pasando el historial
+    const replyText = await this.openAIService.getAIResponse(textBody, history);
 
-    // Enviamos la respuesta
+    // 3) Enviar por WhatsApp
     await this.whatsappService.sendMessage(from, replyText);
-    console.log(chalk.green(`[Enviado] Respuesta a ${from}: ${replyText}`));
+    console.log(chalk.green(`[Enviado] ${from}: ${replyText}`));
 
-    // Actualiza historial
+    // 4) Guardar respuesta en el historial
     history.push({ role: 'assistant', content: replyText });
     if (history.length > this.MAX_CHAT_HISTORY_LENGTH) {
       history.splice(0, history.length - this.MAX_CHAT_HISTORY_LENGTH);
@@ -97,37 +84,28 @@ export class WhatsappWebhookController {
     const challenge = req.query['hub.challenge'];
     if (mode && token === VERIFY_TOKEN) {
       console.log(chalk.green('Webhook VERIFICADO correctamente.'));
-      res.status(200).send(challenge);
-    } else {
-      console.error(chalk.red('Fallo en la verificación del webhook.'));
-      res.status(403).send('Forbidden');
+      return res.status(200).send(challenge);
     }
+    console.error(chalk.red('Fallo verificación webhook.'));
+    return res.status(403).send('Forbidden');
   }
 
   @Post('webhook')
   async receiveMessage(@Req() req: Request, @Res() res: Response) {
     try {
-      const messageData: WhatsAppMessagePayload = req.body;
-      const entry = messageData.entry?.[0];
+      const payload: WhatsAppMessagePayload = req.body;
+      const entry = payload.entry?.[0];
       const change = entry?.changes?.[0];
-      if (!entry || !change) return res.status(200).send('EVENT_RECEIVED');
-
-      if (change.field === 'messages') {
-        const messages = change.value?.messages;
-        if (messages && messages.length > 0) {
-          const { id, from, text } = messages[0];
-          if (!from || !text?.body)
-            return res.status(200).send('EVENT_RECEIVED');
-          if (!this.isDuplicate(id)) {
-            await this.processIncomingMessage(from, text.body);
-          }
+      if (change?.field === 'messages') {
+        const msg = change.value.messages?.[0];
+        if (msg && !this.isDuplicate(msg.id)) {
+          await this.processIncomingMessage(msg.from, msg.text?.body ?? '');
         }
       }
-      // Siempre devolvemos 200 para WhatsApp
-      return res.status(200).send('EVENT_RECEIVED');
-    } catch (error) {
-      console.error(chalk.red('Error procesando el webhook:'), error);
-      return res.status(200).send('EVENT_RECEIVED');
+    } catch (err) {
+      console.error(chalk.red('Error procesando webhook:'), err);
     }
+    // Siempre responder 200
+    return res.status(200).send('EVENT_RECEIVED');
   }
 }
