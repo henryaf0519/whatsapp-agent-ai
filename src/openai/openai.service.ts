@@ -1,18 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
-import { ChatCompletionTool } from 'openai/resources/chat/completions';
-import { ChatMessage } from '../common/interfaces/chat-message';
-import { tools } from './prompts/tools';
-import { systemPrompt } from './prompts/system-prompt';
+import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 @Injectable()
 export class OpenaiService {
   private readonly openai: OpenAI;
   private readonly model: string;
   private readonly logger = new Logger(OpenaiService.name);
-  private readonly tools: ChatCompletionTool[] = tools;
-  private readonly systemPrompt: string = systemPrompt;
-
+  private readonly mcpClient = new McpClient({
+    name: 'whatsapp-ia-client',
+    version: '1.0.0',
+  });
   constructor(private readonly configService: ConfigService) {
     const apiKey = this.configService.get<string>('OPENAI_API_KEY');
     this.model = this.configService.get<string>('OPENAI_MODEL', 'gpt-4o');
@@ -26,74 +25,70 @@ export class OpenaiService {
 
     this.openai = new OpenAI({ apiKey });
   }
+  public async initializeMcpClient() {
+    await this.mcpClient.connect(
+      new StreamableHTTPClientTransport(new URL('http://localhost:3000/mcp')),
+    );
+    this.logger.log('MCP Client conectado a http://localhost:3000/mcp');
+  }
+  async getAIResponse(userMessage: string): Promise<string> {
+    // 1) Pide el prompt con el manifiesto y las reglas
+    const prompt = await this.mcpClient.getPrompt({
+      name: 'route',
+      arguments: { userInput: userMessage },
+    });
 
-  async getAIResponse(
-    userMessage: string,
-    chatHistory: ChatMessage[],
-  ): Promise<string | object> {
-    try {
-      const messagesToSend = [
-        { role: 'system', content: this.systemPrompt },
-        ...chatHistory.map((msg) => {
-          if (
-            msg.role === 'user' ||
-            msg.role === 'assistant' ||
-            msg.role === 'system'
-          ) {
-            return { role: msg.role, content: msg.content };
-          }
-          // If you ever support 'function' role, add name property here
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-return
-          return msg as any;
-        }),
-        { role: 'user', content: userMessage },
-      ] as OpenAI.Chat.Completions.ChatCompletionMessageParam[];
-
-      // CORRECCIÓN CLAVE: Typo en 'completions.create'
-      const response = await this.openai.chat.completions.create({
-        model: this.model,
-        messages: messagesToSend,
-        tools: this.tools,
-        tool_choice: 'auto',
-        temperature: 0.5,
-        max_tokens: 1000,
-      });
-
-      const message = response.choices[0]?.message;
-      console.log('Mensaje de IA:', message);
-
-      if (message?.tool_calls && message.tool_calls.length > 0) {
-        const toolCall = message.tool_calls[0];
-        this.logger.log(
-          `¡IA sugiere llamada a herramienta! Nombre: ${toolCall.function.name}, Argumentos: ${JSON.stringify(toolCall.function.arguments)}`,
-        );
-
-        return {
-          tool_call: {
-            name: toolCall.function.name,
-            arguments: JSON.parse(toolCall.function.arguments || '{}'),
-          },
-        };
-      } else {
-        const aiResponseContent = message?.content ?? '';
-        this.logger.log(
-          `IA respondió conversacionalmente: ${aiResponseContent}`,
-        );
-        return aiResponseContent;
+    const messagesToSend = prompt.messages.map((m) => {
+      if (m.content.type === 'text') {
+        return { role: m.role, content: m.content.text };
       }
-    } catch (error) {
-      if (error instanceof OpenAI.APIError) {
-        this.logger.error(
-          `Error de la API de OpenAI (Código: ${error.status || 'N/A'}): ${error.message}`,
-          error.code,
-        );
-        return 'Lo siento, la API de OpenAI experimentó un problema. Por favor, inténtalo de nuevo más tarde.';
-      } else if (error instanceof Error) {
-        this.logger.error('Error general al llamar a OpenAI:', error.message);
-      } else {
-        this.logger.error('Error inesperado al llamar a OpenAI:', error);
-      }
-      return 'Lo siento, tuve un error al procesar tu solicitud. Por favor, inténtalo de nuevo.';
+      throw new Error(`Tipo de contenido no soportado: ${m.content.type}`);
+    }) as OpenAI.Chat.Completions.ChatCompletionMessageParam[];
+
+    // 2) Llama al modelo con esos mensajes
+    const resp = await this.openai.chat.completions.create({
+      model: this.model,
+      messages: messagesToSend,
+      temperature: 0,
+    });
+    const content = resp.choices[0]?.message.content?.trim() ?? '';
+    // 3) Intenta parsear JSON. Si no es válido, es texto conversacional:
+    interface Call {
+      method: string;
+      params: any;
     }
+    let call: Call;
+    try {
+      call = JSON.parse(content) as Call;
+    } catch {
+      // No JSON → faltan datos o pregunta conversacional
+      return content;
+    }
+
+    this.logger.log(
+      `Llamando a la herramienta ${call.method} con parámetros: ${JSON.stringify(call.params)}`,
+    );
+    const result = await this.mcpClient.callTool({
+      name: call.method,
+      arguments: call.params,
+    });
+
+    // 5) Devuelve la respuesta de la herramienta
+    if (
+      result &&
+      Array.isArray(result.content) &&
+      result.content.length > 0 &&
+      typeof result.content[0] === 'object' &&
+      result.content[0] !== null &&
+      'text' in result.content[0]
+    ) {
+      return (result.content[0] as { text: string }).text ?? '';
+    } else if (result && result.error) {
+      this.logger.error(
+        `Error al llamar a la herramienta ${call.method}: ${JSON.stringify(result.error)}`,
+      );
+      return `Error: ${JSON.stringify(result.error)}`;
+    }
+    return '';
   }
 }

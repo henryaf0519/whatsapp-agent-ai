@@ -59,8 +59,6 @@ export class CalendarService {
     }
 
     const url = `${this.baseUrl}/calendars/${this.calendarId}/events?sendUpdates=all`;
-    this.logger.log(`POST ${url} — start=${body.start.dateTime}`);
-
     try {
       const { data } = await axios.post(url, body, {
         headers: {

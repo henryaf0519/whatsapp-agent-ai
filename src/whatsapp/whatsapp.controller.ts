@@ -13,10 +13,7 @@ export class WhatsappController {
   async handleMessage(@Body() body: { message: string; phone: string }) {
     const { message, phone } = body;
 
-    const aiResponse = await this.openAIService.getAIResponse(
-      message,
-      [], // Pass an empty array if there's no chat history
-    );
+    const aiResponse = await this.openAIService.getAIResponse(message);
     const aiResponseString =
       typeof aiResponse === 'string' ? aiResponse : JSON.stringify(aiResponse);
     const response: unknown = await this.whatsappService.sendMessage(

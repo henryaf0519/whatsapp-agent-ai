@@ -9,12 +9,14 @@ import { ConfigModule } from '@nestjs/config';
 import { EmailService } from './email/email.service';
 import { CalendarService } from './calendar/calendar.service';
 import { EmailController } from './email/email.controller';
+import { McpModule } from './mcp/mcp.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    McpModule,
   ],
   controllers: [
     AppController,
