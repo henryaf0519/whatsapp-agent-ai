@@ -28,6 +28,19 @@ export class McpService {
       description: 'Lista eventos de una fecha dada.',
       inputKeys: ['date'],
     },
+    {
+      name: 'Calendar_Update',
+      description: 'Modifica un evento existente en el calendario.',
+      inputKeys: [
+        'date',
+        'time',
+        'title',
+        'duration_minutes',
+        'attendees',
+        'client_email',
+        'search_summary',
+      ],
+    },
   ];
 
   constructor(
@@ -92,31 +105,132 @@ export class McpService {
     );
 
     // Registrar Calendar_Get
-    /* server.registerTool(
+    server.registerTool(
       'Calendar_Get',
       {
         title: 'Consultar calendario',
-        description: this.toolsMeta[2].description,
-        inputSchema: { date: z.string().optional() },
+        description:
+          'Lista tus eventos programados en una fecha. **Requiere** user_email para validar identidad.',
+        inputSchema: {
+          date: z.string(), // "YYYY-MM-DD"
+          user_email: z.string().email(), // correo del cliente
+        },
       },
-      async ({ date }) => {
-        const events = await this.calendarService.getEvents(
-          date || new Date().toISOString().slice(0, 10),
-        );
-        const text = events.length
-          ? events.map((e) => `${e.start} – ${e.summary}`).join('\n')
-          : 'No hay eventos.';
-        return { content: [{ type: 'text', text }] };
+      async ({ date, user_email }) => {
+        // Lógica de seguridad: solo devuelve eventos del email proporcionado
+        const events = await this.calendarService.getEvents(date, user_email);
+        if (events.length === 0) {
+          return {
+            content: [{ type: 'text', text: `No tienes eventos el ${date}.` }],
+          };
+        }
+        // Formatear lista de eventos
+        const lines = events.map((e) => `• ${e.start} - ${e.summary}`);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Tus eventos para ${date}:\n` + lines.join('\n'),
+            },
+          ],
+        };
       },
-    );*/
+    );
 
+    server.registerTool(
+      'Calendar_Update',
+      {
+        title: 'Modificar evento',
+        description:
+          'Modifica un evento del día en el que tú (cliente) figuras como asistente.',
+        inputSchema: {
+          date: z.string(), // "YYYY-MM-DD"
+          client_email: z.string().email(), // email del cliente (debe coincidir con un attendee)
+          search_summary: z.string().optional(), // fragmento del título
+          time: z.string().optional(),
+          title: z.string().optional(),
+          duration_minutes: z.number().optional(),
+          attendees: z.array(z.string().email()).optional(),
+        },
+      },
+      async ({
+        date,
+        client_email,
+        search_summary,
+        time,
+        title,
+        duration_minutes,
+        attendees,
+      }) => {
+        console.log(
+          `Modificar evento: ${date}, ${client_email}, ${search_summary}, ${time}, ${title}, ${duration_minutes}`,
+        );
+        // 1) Obtengo eventos donde el cliente es attendee
+        const events = await this.calendarService.getEventsByAttendee(
+          date,
+          client_email,
+        );
+        console.log(
+          `Eventos encontrados para ${client_email} el ${date}: ${events.length}`,
+        );
+
+        if (events.length === 0) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `No encontré ninguna cita el ${date} donde estés como invitado (${client_email}).`,
+              },
+            ],
+          };
+        }
+
+        // 2) Busco el que coincida con el fragmento de título
+        const match = events.find((e) =>
+          e.summary.toLowerCase().includes(search_summary.toLowerCase()),
+        );
+        if (!match) {
+          const list = events
+            .map((e) => `• ${e.summary} a las ${e.start}`)
+            .join('\n');
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Vi estos eventos el ${date}:\n${list}\n\n¿Cuál deseas modificar? Por favor, escribe el título exacto o un fragmento más preciso.`,
+              },
+            ],
+          };
+        }
+
+        // 3) Modifico usando el ID interno
+        await this.calendarService.updateEvent(client_email, {
+          date,
+          time,
+          title,
+          durationMinutes: duration_minutes,
+          attendees,
+          search_summary: '',
+        });
+
+        // 4) Confirmación al cliente
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `He modificado tu cita "${match.summary}" correctamente ✅`,
+            },
+          ],
+        };
+      },
+    );
     // Prompt de ruteo
     server.registerPrompt(
       'route',
       {
         title: 'Decidir herramienta',
         description:
-          'Selecciona Gmail_Send o Calendar_Set, o pregunta datos faltantes.',
+          'Selecciona Gmail_Send o Calendar_Set o Calendar_Get o Calendar_Update o pregunta datos faltantes.',
         argsSchema: { userInput: z.string() },
       },
       ({ userInput }) => {
@@ -139,9 +253,29 @@ export class McpService {
           {"jsonrpc":"2.0","method":"Gmail_Send","params":{…}}
           
 
-          2 Si **faltan** datos (asunto, fecha, título, etc.), responde en texto de forma profesional y amable **solicitando únicamente** lo que hace falta (p.ej. “Por favor indícame el asunto del correo”).  
+          2 Si **faltan** datos (asunto, fecha, título, etc.), 
+          Para **Calendar_Get**:**Por favor, indícame tu correo electrónico para validar tu identidad.**
+          responde en texto de forma profesional y amable **solicitando únicamente** lo que hace falta (p.ej. “Por favor indícame el asunto del correo”).
+          
+          3 Para **Calendar_Update** (modificar una cita existente):
+          - Necesito **fecha**, **fragmento del título** y **tu correo** (como asistente).
+          - Si falta alguno, **pregunta solo** por ese dato:
+            • Si falta correo: “Por favor, indícame tu correo electrónico con el que fuiste invitado.”
+            • Si falta fecha: “¿En qué fecha está la cita que deseas modificar?”
+            • Si falta fragmento de título: “¿Cuál es el título o una parte del título de la cita?”
+          - Una vez tengas esos tres, **y opcionalmente** los campos a cambiar (hora, nuevo título, duración o asistentes), **responde sólo** con la llamada JSON-RPC, por ejemplo:
 
-          3 **Nunca** combines JSON-RPC y conversación en una misma respuesta.
+        {"jsonrpc":"2.0","method":"Calendar_Update","params":{
+          "date":"2025-07-15",
+          "client_email":"cliente@ejemplo.com",
+          "search_summary":"revisión de proyecto",
+          "time":"10:00",
+          "title":"Revisión detalle proyecto",
+          "duration_minutes":45
+        }}
+
+
+          4 **Nunca** combines JSON-RPC y conversación en una misma respuesta.
           `.trim();
 
         const messages = [

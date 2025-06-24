@@ -71,18 +71,20 @@ export class OpenaiService {
       messages: msgs,
       temperature: 0,
     });
-    this.logger.log(
-      `Respuesta de OpenAI: ${resp.choices[0]?.message.content?.trim()}`,
-    );
     const raw = resp.choices[0]?.message.content?.trim() ?? '';
 
-    // 4) JSON-RPC → llama a tool y devuelve sólo el texto
+    const candidate = raw
+      .trim()
+      .replace(/^```json\s*/, '')
+      .replace(/^```/, '')
+      .replace(/```$/, '')
+      .trim();
+    this.logger.log(`Respuesta de OpenAI (candidate): ${candidate}`);
     try {
-      const { method, params } = JSON.parse(raw) as {
+      const { method, params } = JSON.parse(candidate) as {
         method: string;
         params: Record<string, any>;
       };
-      this.logger.log(`Invocando herramienta ${method}`);
       const result = await this.mcpClient.callTool({
         name: method,
         arguments: params,
