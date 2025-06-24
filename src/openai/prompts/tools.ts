@@ -6,7 +6,7 @@ export const tools: ChatCompletionTool[] = [
     function: {
       name: 'Gmail_Send',
       description:
-        'Envía un nuevo correo electrónico a un destinatario específico con un asunto y un cuerpo. Si se proporciona, usa el nombre del destinatario para personalizar el saludo.',
+        'Envía un nuevo correo electrónico a un destinatario específico con un asunto y un cuerpo. La IA debe redactar un cuerpo de correo profesional, completo y atractivo basado en la intención del usuario. Si se proporciona, usa el nombre del destinatario para personalizar el saludo.',
       parameters: {
         type: 'object',
         properties: {
@@ -22,7 +22,7 @@ export const tools: ChatCompletionTool[] = [
           body: {
             type: 'string',
             description:
-              'El contenido principal del correo electrónico. Debe ser una versión profesional y completa del mensaje del usuario, redactada para asegurar claridad y formalidad.',
+              "El contenido principal del correo electrónico. DEBE ser una versión profesional, completa, bien estructurada y persuasiva del mensaje del usuario. La IA debe expandir la intención del usuario en un correo bien redactado, incluyendo un saludo y una despedida adecuados. Por ejemplo, si el usuario dice 'enviar invitación', la IA debe redactar la invitación completa y atractiva.",
           },
           recipient_name: {
             type: 'string',
@@ -45,7 +45,7 @@ export const tools: ChatCompletionTool[] = [
           date: {
             type: 'string',
             description:
-              "La fecha de la reunión en formato YYYY-MM-DD. Debe ser una fecha concreta (ej. '2025-07-15'), no relativa.",
+              "La fecha de la reunión en formato AAAA-MM-DD. Debe ser una fecha concreta (ej. '2025-07-15'), no relativa.",
           },
           time: {
             type: 'string',
@@ -77,7 +77,7 @@ export const tools: ChatCompletionTool[] = [
           date: {
             type: 'string',
             description:
-              "La fecha a consultar en formato YYYY-MM-DD. Por defecto es la fecha actual ('today') si no se especifica. Debe ser una fecha concreta (ej. '2025-07-15'), no relativa.",
+              "La fecha a consultar en formato AAAA-MM-DD. Por defecto es la fecha actual ('today') si no se especifica. Debe ser una fecha concreta (ej. '2025-07-15'), no relativa.",
           },
         },
       },
