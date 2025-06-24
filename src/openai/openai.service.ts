@@ -2,9 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { ChatCompletionTool } from 'openai/resources/chat/completions';
-import { ChatMessage } from '../common/interfaces/chat-message';
 import { tools } from './prompts/tools';
 import { systemPrompt } from './prompts/system-prompt';
+import { Conversation, parseToolCall } from '@modelcontextprotocol/sdk';
 @Injectable()
 export class OpenaiService {
   private readonly openai: OpenAI;
@@ -27,27 +27,9 @@ export class OpenaiService {
     this.openai = new OpenAI({ apiKey });
   }
 
-  async getAIResponse(
-    userMessage: string,
-    chatHistory: ChatMessage[],
-  ): Promise<string | object> {
+  async getAIResponse(conversation: Conversation): Promise<string | object> {
     try {
-      const messagesToSend = [
-        { role: 'system', content: this.systemPrompt },
-        ...chatHistory.map((msg) => {
-          if (
-            msg.role === 'user' ||
-            msg.role === 'assistant' ||
-            msg.role === 'system'
-          ) {
-            return { role: msg.role, content: msg.content };
-          }
-          // If you ever support 'function' role, add name property here
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-return
-          return msg as any;
-        }),
-        { role: 'user', content: userMessage },
-      ] as OpenAI.Chat.Completions.ChatCompletionMessageParam[];
+      const messagesToSend = conversation.toOpenAIMessages();
 
       // CORRECCIÓN CLAVE: Typo en 'completions.create'
       const response = await this.openai.chat.completions.create({
@@ -63,16 +45,13 @@ export class OpenaiService {
       console.log('Mensaje de IA:', message);
 
       if (message?.tool_calls && message.tool_calls.length > 0) {
-        const toolCall = message.tool_calls[0];
+        const parsed = parseToolCall<any>(message.tool_calls[0]);
         this.logger.log(
-          `¡IA sugiere llamada a herramienta! Nombre: ${toolCall.function.name}, Argumentos: ${JSON.stringify(toolCall.function.arguments)}`,
+          `¡IA sugiere llamada a herramienta! Nombre: ${parsed.name}, Argumentos: ${JSON.stringify(parsed.arguments)}`,
         );
 
         return {
-          tool_call: {
-            name: toolCall.function.name,
-            arguments: JSON.parse(toolCall.function.arguments || '{}'),
-          },
+          tool_call: parsed,
         };
       } else {
         const aiResponseContent = message?.content ?? '';

@@ -6,7 +6,8 @@ import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { EmailService } from '../email/email.service';
 import { CalendarService } from '../calendar/calendar.service';
 import chalk from 'chalk';
-import { ChatMessage } from '../common/interfaces/chat-message';
+import { McpConversationService } from '../context/mcp-conversation.service';
+import { ParsedToolCall } from '@modelcontextprotocol/sdk';
 
 // Interfaz para el payload del webhook de WhatsApp (tu definición existente)
 interface WhatsAppMessagePayload {
@@ -76,6 +77,7 @@ export class WhatsappWebhookController {
     private readonly configService: ConfigService,
     private readonly emailService: EmailService,
     private readonly calendarService: CalendarService,
+    private readonly conversationService: McpConversationService,
   ) {}
 
   // Propiedades para la deduplicación en memoria
@@ -94,9 +96,6 @@ export class WhatsappWebhookController {
     return false;
   }
 
-  // **ALMACENAMIENTO DEL HISTORIAL DE CONVERSACIÓN EN MEMORIA (PARA PRUEBAS LOCALES)**
-  private conversationHistory = new Map<string, ChatMessage[]>();
-  private readonly MAX_CHAT_HISTORY_LENGTH = 10; // Limitar el historial para el LLM (5 pares de turno)
 
   private async processIncomingMessage(
     from: string,
@@ -104,39 +103,21 @@ export class WhatsappWebhookController {
   ): Promise<void> {
     console.log(chalk.blue(`[Recibido] Mensaje de ${from}: ${textBody}`));
 
-    const currentChatHistory = this.conversationHistory.get(from) || [];
-    currentChatHistory.push({ role: 'user', content: textBody });
+    this.conversationService.appendUserMessage(from, textBody);
+    const conversation = this.conversationService.getConversation(from);
 
-    const aiResponse = await this.openAIService.getAIResponse(
-      textBody,
-      currentChatHistory,
-    );
-
-    if (currentChatHistory.length > this.MAX_CHAT_HISTORY_LENGTH) {
-      currentChatHistory.splice(
-        0,
-        currentChatHistory.length - this.MAX_CHAT_HISTORY_LENGTH,
-      );
-    }
-    this.conversationHistory.set(from, currentChatHistory);
+    const aiResponse = await this.openAIService.getAIResponse(conversation);
 
     if (typeof aiResponse === 'object' && 'tool_call' in aiResponse) {
-      const toolCallObject = aiResponse.tool_call as ToolCallObject;
+      const toolCallObject = aiResponse.tool_call as ParsedToolCall<any>;
       console.log(
         chalk.cyan(
-          `[AGENTE] Respuesta de IA con tool_call: ${JSON.stringify(
-            toolCallObject,
-          )}`,
+          `[AGENTE] Respuesta de IA con tool_call: ${JSON.stringify(toolCallObject)}`,
         ),
       );
-      if (toolCallObject && typeof toolCallObject === 'object') {
+      if (toolCallObject) {
         const toolName = toolCallObject.name;
-        let toolArgs: any;
-        if (typeof toolCallObject.arguments === 'string') {
-          toolArgs = JSON.parse(toolCallObject.arguments);
-        } else {
-          toolArgs = toolCallObject.arguments;
-        }
+        const toolArgs: any = toolCallObject.arguments;
 
         console.log(
           chalk.magenta(
@@ -194,10 +175,7 @@ export class WhatsappWebhookController {
         }
 
         await this.whatsappService.sendMessage(from, whatsappReply);
-        currentChatHistory.push({
-          role: 'assistant',
-          content: whatsappReply,
-        });
+        this.conversationService.appendAssistantMessage(from, whatsappReply);
       } else {
         console.warn(
           chalk.yellow(
@@ -208,18 +186,14 @@ export class WhatsappWebhookController {
           from,
           'Lo siento, la IA intentó usar una herramienta, pero hubo un problema interno con la instrucción. Por favor, inténtalo de nuevo.',
         );
-        currentChatHistory.push({
-          role: 'assistant',
-          content:
-            'Lo siento, la IA intentó usar una herramienta, pero hubo un problema interno con la instrucción. Por favor, inténtalo de nuevo.',
-        });
+        this.conversationService.appendAssistantMessage(
+          from,
+          'Lo siento, la IA intentó usar una herramienta, pero hubo un problema interno con la instrucción. Por favor, inténtalo de nuevo.',
+        );
       }
     } else {
       await this.whatsappService.sendMessage(from, aiResponse as string);
-      currentChatHistory.push({
-        role: 'assistant',
-        content: aiResponse as string,
-      });
+      this.conversationService.appendAssistantMessage(from, aiResponse as string);
     }
 
     console.log(chalk.green(`[Enviado] Respuesta del asistente a ${from}.`));

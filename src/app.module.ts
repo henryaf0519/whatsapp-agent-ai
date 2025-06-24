@@ -9,6 +9,7 @@ import { ConfigModule } from '@nestjs/config';
 import { EmailService } from './email/email.service';
 import { CalendarService } from './calendar/calendar.service';
 import { EmailController } from './email/email.controller';
+import { McpConversationService } from './context/mcp-conversation.service';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { EmailController } from './email/email.controller';
     OpenaiService,
     EmailService,
     CalendarService,
+    McpConversationService,
   ],
 })
 export class AppModule {}
