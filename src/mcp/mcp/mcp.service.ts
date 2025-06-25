@@ -3,6 +3,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { EmailService } from '../../email/email.service';
 import { CalendarService } from '../../calendar/calendar.service';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 
 interface ToolMeta {
   name: string;
@@ -49,6 +51,10 @@ export class McpService {
   ) {}
 
   getServer(): McpServer {
+    const prompt: { title: string; description: string; prompt: string } =
+      JSON.parse(
+        readFileSync(join(__dirname, '../../../promptVentas.json'), 'utf8'),
+      );
     const server = new McpServer({
       name: 'nestjs-mcp',
       version: '1.0.0',
@@ -110,27 +116,49 @@ export class McpService {
       {
         title: 'Consultar calendario',
         description:
-          'Lista tus eventos programados en una fecha. **Requiere** user_email para validar identidad.',
+          'Muestra tus eventos programados y los huecos libres de lunes a viernes entre 08:00 y 17:00 (excluye 13:00–14:00).',
         inputSchema: {
-          date: z.string(), // "YYYY-MM-DD"
-          user_email: z.string().email(), // correo del cliente
+          date: z.string(),
         },
       },
-      async ({ date, user_email }) => {
+      async ({ date }) => {
         // Lógica de seguridad: solo devuelve eventos del email proporcionado
-        const events = await this.calendarService.getEvents(date, user_email);
-        if (events.length === 0) {
+        const events = await this.calendarService.getEvents(date);
+        const businessSlots = [
+          ...[8, 9, 10, 11, 12].map(
+            (h) => `${h.toString().padStart(2, '0')}:00`,
+          ),
+          ...[14, 15, 16].map((h) => `${h}:00`),
+        ];
+        const busySlots = events.map((e) => e.start);
+        const freeSlots = businessSlots.filter(
+          (slot) => !busySlots.includes(slot),
+        );
+        if (freeSlots.length === 0) {
           return {
-            content: [{ type: 'text', text: `No tienes eventos el ${date}.` }],
+            content: [
+              {
+                type: 'text',
+                text: `Lo siento, no hay franjas disponibles el ${date} entre las 08:00 y 17:00.`,
+              },
+            ],
           };
         }
-        // Formatear lista de eventos
-        const lines = events.map((e) => `• ${e.start} - ${e.summary}`);
         return {
           content: [
             {
               type: 'text',
-              text: `Tus eventos para ${date}:\n` + lines.join('\n'),
+              text:
+                `Estos son los horarios libres el ${date}:\n` +
+                freeSlots
+                  .map(
+                    (h) =>
+                      `• ${h}–${(parseInt(h) + 1)
+                        .toString()
+                        .padStart(2, '0')}:00`,
+                  )
+                  .join('\n') +
+                `\n\nPor favor, indícame qué hora te va bien.`,
             },
           ],
         };
@@ -186,9 +214,11 @@ export class McpService {
         }
 
         // 2) Busco el que coincida con el fragmento de título
-        const match = events.find((e) =>
-          e.summary.toLowerCase().includes(search_summary.toLowerCase()),
-        );
+        const match = search_summary
+          ? events.find((e) =>
+              e.summary.toLowerCase().includes(search_summary.toLowerCase()),
+            )
+          : undefined;
         if (!match) {
           const list = events
             .map((e) => `• ${e.summary} a las ${e.start}`)
@@ -228,9 +258,8 @@ export class McpService {
     server.registerPrompt(
       'route',
       {
-        title: 'Decidir herramienta',
-        description:
-          'Selecciona Gmail_Send o Calendar_Set o Calendar_Get o Calendar_Update o pregunta datos faltantes.',
+        title: prompt.title,
+        description: prompt.description,
         argsSchema: { userInput: z.string() },
       },
       ({ userInput }) => {
@@ -239,44 +268,10 @@ export class McpService {
             (t) => `• ${t.name}(${t.inputKeys.join(', ')}): ${t.description}`,
           )
           .join('\n');
-        const systemText = `
-          Eres un asistente que puede usar estas herramientas:
-          ${manifest}
 
-          1 Si el usuario ha dado **todos** los datos** requeridos para una herramienta:
-            Para **Gmail_Send**: **redacta un correo profesional, completo y persuasivo** partiendo de la intención o texto breve que te proporcionó. **No repitas** literalmente lo que escribió; en su lugar:
-              • Elige un saludo atractivo.  
-              • Escribe un cuerpo bien estructurado que amplíe y mejore su idea.  
-              • Cierra con una despedida apropiada.  
-            Luego responde **solo** con la llamada JSON-RPC, por ejemplo:
-          
-          {"jsonrpc":"2.0","method":"Gmail_Send","params":{…}}
-          
-
-          2 Si **faltan** datos (asunto, fecha, título, etc.), 
-          Para **Calendar_Get**:**Por favor, indícame tu correo electrónico para validar tu identidad.**
-          responde en texto de forma profesional y amable **solicitando únicamente** lo que hace falta (p.ej. “Por favor indícame el asunto del correo”).
-          
-          3 Para **Calendar_Update** (modificar una cita existente):
-          - Necesito **fecha**, **fragmento del título** y **tu correo** (como asistente).
-          - Si falta alguno, **pregunta solo** por ese dato:
-            • Si falta correo: “Por favor, indícame tu correo electrónico con el que fuiste invitado.”
-            • Si falta fecha: “¿En qué fecha está la cita que deseas modificar?”
-            • Si falta fragmento de título: “¿Cuál es el título o una parte del título de la cita?”
-          - Una vez tengas esos tres, **y opcionalmente** los campos a cambiar (hora, nuevo título, duración o asistentes), **responde sólo** con la llamada JSON-RPC, por ejemplo:
-
-        {"jsonrpc":"2.0","method":"Calendar_Update","params":{
-          "date":"2025-07-15",
-          "client_email":"cliente@ejemplo.com",
-          "search_summary":"revisión de proyecto",
-          "time":"10:00",
-          "title":"Revisión detalle proyecto",
-          "duration_minutes":45
-        }}
-
-
-          4 **Nunca** combines JSON-RPC y conversación en una misma respuesta.
-          `.trim();
+        const systemText = prompt.prompt
+          .replace('{{manifest}}', manifest)
+          .trim();
 
         const messages = [
           {

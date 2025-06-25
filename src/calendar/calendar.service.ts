@@ -87,16 +87,10 @@ export class CalendarService {
 
   async getEvents(
     date: string,
-    userEmail: string,
   ): Promise<Array<{ start: string; summary: string }>> {
-    // Validación de seguridad
-    if (userEmail !== this.calendarId) {
-      this.logger.warn(
-        `Acceso a eventos denegado para ${userEmail}, solo ${this.calendarId} es permitido`,
-      );
-      throw new ForbiddenException(
-        'Email no autorizado para consultar eventos',
-      );
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      this.logger.error('Fecha inválida proporcionada');
+      throw new ForbiddenException('Fecha inválida proporcionada');
     }
 
     const resToken = await this.oauth2Client.getAccessToken();
@@ -105,11 +99,8 @@ export class CalendarService {
       this.logger.error('No se pudo obtener access token');
       throw new InternalServerErrorException('Error obteniendo access token');
     }
-
-    // Rango de un día
     const timeMin = new Date(`${date}T00:00:00-05:00`).toISOString();
     const timeMax = new Date(`${date}T23:59:59-05:00`).toISOString();
-
     const url = `${this.baseUrl}/calendars/${this.calendarId}/events`;
     try {
       const { data } = await axios.get<{

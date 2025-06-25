@@ -14,7 +14,8 @@
     "incremental": true,
     "noImplicitAny": false,
     "strictBindCallApply": false,
-    "noFallthroughCasesInSwitch": false
+    "noFallthroughCasesInSwitch": false,
+    "resolveJsonModule": true,
   },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules"]
