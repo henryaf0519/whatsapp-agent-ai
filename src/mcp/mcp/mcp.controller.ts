@@ -13,20 +13,25 @@ export class McpController {
     const server = this.mcpService.getServer();
 
     // 2) Crea un transporte HTTP stateless
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
     });
 
     // 3) Cuando se cierre la conexión limpia recursos
     res.on('close', () => {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
       transport.close();
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
       server.close();
     });
 
     // 4) Conecta el servidor al transporte…
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     await server.connect(transport);
 
     // 5) …y atiende la petición JSON-RPC que viene en el body
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     await transport.handleRequest(req, res, req.body);
   }
 }

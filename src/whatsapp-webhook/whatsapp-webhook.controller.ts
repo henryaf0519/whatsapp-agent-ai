@@ -3,7 +3,6 @@ import { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import chalk from 'chalk';
 
-import { OpenaiService } from '../openai/openai.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { ChatMessage } from '../common/interfaces/chat-message';
 
@@ -34,7 +33,6 @@ export class WhatsappWebhookController {
   private readonly MAX_HISTORY = 10;
 
   constructor(
-    private readonly openAIService: OpenaiService,
     private readonly whatsappService: WhatsappService,
     private readonly configService: ConfigService,
   ) {}
@@ -57,7 +55,7 @@ export class WhatsappWebhookController {
     }
 
     // 2) Llama a OpenAIService PASANDOLE el historial completo
-    const reply = await this.openAIService.getAIResponse(text, history);
+    const reply = 'Hola';
 
     // 3) Envía por WhatsApp sólo el texto resultante
     await this.whatsappService.sendMessage(from, reply);

@@ -3,13 +3,14 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { WhatsappController } from './whatsapp/whatsapp.controller';
 import { WhatsappService } from './whatsapp/whatsapp.service';
-import { OpenaiService } from './openai/openai.service';
 import { WhatsappWebhookController } from './whatsapp-webhook/whatsapp-webhook.controller';
 import { ConfigModule } from '@nestjs/config';
 import { EmailService } from './email/email.service';
 import { CalendarService } from './calendar/calendar.service';
 import { EmailController } from './email/email.controller';
 import { McpModule } from './mcp/mcp.module';
+import { AgentService } from './langchain/agent/agent.service';
+import { ChatModule } from './chat/chat.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { McpModule } from './mcp/mcp.module';
       isGlobal: true,
     }),
     McpModule,
+    ChatModule,
   ],
   controllers: [
     AppController,
@@ -27,9 +29,9 @@ import { McpModule } from './mcp/mcp.module';
   providers: [
     AppService,
     WhatsappService,
-    OpenaiService,
     EmailService,
     CalendarService,
+    AgentService,
   ],
 })
 export class AppModule {}

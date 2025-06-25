@@ -1,7 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import 'reflect-metadata';
-import { OpenaiService } from './openai/openai.service';
 declare const module: any;
 
 async function bootstrap() {
@@ -15,7 +14,5 @@ async function bootstrap() {
     module.hot.dispose(() => app.close());
   }
   console.log(`Application is running on: ${await app.getUrl()}`);
-  const openaiService = app.get(OpenaiService);
-  await openaiService.initializeMcpClient();
 }
 void bootstrap();

@@ -1,11 +1,11 @@
+// src/mcp/mcp.service.ts
 import { Injectable } from '@nestjs/common';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { EmailService } from '../../email/email.service';
 import { CalendarService } from '../../calendar/calendar.service';
-import { readFileSync } from 'fs';
-import { join } from 'path';
 
+// Mantén esta parte, define la estructura de las herramientas para McpServer
 interface ToolMeta {
   name: string;
   description: string;
@@ -15,6 +15,7 @@ interface ToolMeta {
 @Injectable()
 export class McpService {
   private readonly toolsMeta: ToolMeta[] = [
+    // Asegúrate de que las descripciones aquí son buenas
     {
       name: 'Gmail_Send',
       description: 'Envía un correo con asunto, cuerpo y destinatario.',
@@ -51,26 +52,30 @@ export class McpService {
   ) {}
 
   getServer(): McpServer {
-    const prompt: { title: string; description: string; prompt: string } =
-      JSON.parse(
-        readFileSync(join(__dirname, '../../../promptVentas.json'), 'utf8'),
-      );
     const server = new McpServer({
       name: 'nestjs-mcp',
       version: '1.0.0',
     });
 
-    // Registrar Gmail_Send
+    // Registra tus herramientas con descripciones claras para el LLM (aunque LangChain las tendrá también)
+    // Gmail_Send
     server.registerTool(
       'Gmail_Send',
       {
         title: 'Enviar email',
-        description: this.toolsMeta[0].description,
+        description:
+          'Envía un correo electrónico. Requiere el email del destinatario, un asunto y el cuerpo del mensaje.', // Descripción clara para quien use el servidor MCP
         inputSchema: {
-          recipient: z.string().email(),
-          subject: z.string(),
-          body: z.string(),
-          recipient_name: z.string().optional(),
+          recipient: z
+            .string()
+            .email()
+            .describe('The email address of the recipient.'),
+          subject: z.string().describe('The subject line of the email.'),
+          body: z.string().describe('The main content of the email.'),
+          recipient_name: z
+            .string()
+            .optional()
+            .describe('The optional name of the recipient.'),
         },
       },
       async ({ recipient, subject, body, recipient_name }) => {
@@ -84,18 +89,32 @@ export class McpService {
       },
     );
 
-    // Registrar Calendar_Set
+    // Calendar_Set
     server.registerTool(
       'Calendar_Set',
       {
         title: 'Agendar cita',
-        description: this.toolsMeta[1].description,
+        description: 'Crea un evento en Google Calendar de 60 minutos.',
         inputSchema: {
-          date: z.string(),
-          time: z.string(),
-          title: z.string(),
-          duration_minutes: z.number().optional(),
-          attendees: z.array(z.string().email()).optional(),
+          date: z
+            .string()
+            .describe('The date for the appointment in YYYY-MM-DD format.'),
+          time: z
+            .string()
+            .describe(
+              'The time for the appointment in HH:MM (24-hour) format.',
+            ),
+          title: z.string().describe('The title of the appointment.'),
+          duration_minutes: z
+            .number()
+            .optional()
+            .describe(
+              'The duration of the appointment in minutes (default 60).',
+            ),
+          attendees: z
+            .array(z.string().email())
+            .optional()
+            .describe('An array of attendee email addresses.'),
         },
       },
       async ({ date, time, title, duration_minutes, attendees }) => {
@@ -110,7 +129,7 @@ export class McpService {
       },
     );
 
-    // Registrar Calendar_Get
+    // Calendar_Get
     server.registerTool(
       'Calendar_Get',
       {
@@ -118,11 +137,14 @@ export class McpService {
         description:
           'Muestra tus eventos programados y los huecos libres de lunes a viernes entre 08:00 y 17:00 (excluye 13:00–14:00).',
         inputSchema: {
-          date: z.string(),
+          date: z
+            .string()
+            .describe(
+              'The date to get calendar events for, in YYYY-MM-DD format.',
+            ),
         },
       },
       async ({ date }) => {
-        // Lógica de seguridad: solo devuelve eventos del email proporcionado
         const events = await this.calendarService.getEvents(date);
         const businessSlots = [
           ...[8, 9, 10, 11, 12].map(
@@ -134,6 +156,7 @@ export class McpService {
         const freeSlots = businessSlots.filter(
           (slot) => !busySlots.includes(slot),
         );
+
         if (freeSlots.length === 0) {
           return {
             content: [
@@ -153,9 +176,7 @@ export class McpService {
                 freeSlots
                   .map(
                     (h) =>
-                      `• ${h}–${(parseInt(h) + 1)
-                        .toString()
-                        .padStart(2, '0')}:00`,
+                      `• ${h}–${(parseInt(h) + 1).toString().padStart(2, '0')}:00`,
                   )
                   .join('\n') +
                 `\n\nPor favor, indícame qué hora te va bien.`,
@@ -165,20 +186,42 @@ export class McpService {
       },
     );
 
+    // Calendar_Update
     server.registerTool(
       'Calendar_Update',
       {
         title: 'Modificar evento',
         description:
-          'Modifica un evento del día en el que tú (cliente) figuras como asistente.',
+          'Modifica un evento del día en el que tú (cliente) figuras como asistente. Necesitas la fecha, el email del cliente, y un resumen para buscar el evento.',
         inputSchema: {
-          date: z.string(), // "YYYY-MM-DD"
-          client_email: z.string().email(), // email del cliente (debe coincidir con un attendee)
-          search_summary: z.string().optional(), // fragmento del título
-          time: z.string().optional(),
-          title: z.string().optional(),
-          duration_minutes: z.number().optional(),
-          attendees: z.array(z.string().email()).optional(),
+          date: z
+            .string()
+            .describe('The date of the event to modify in YYYY-MM-DD format.'),
+          client_email: z
+            .string()
+            .email()
+            .describe(
+              'The email of the client attending the event to be modified. This is mandatory to find the event.',
+            ),
+          search_summary: z
+            .string()
+            .optional()
+            .describe(
+              'A fragment of the event title to uniquely identify the event. If multiple matches, it will list options.',
+            ),
+          time: z
+            .string()
+            .optional()
+            .describe('The new time for the event in HH:MM (24-hour) format.'),
+          title: z.string().optional().describe('The new title for the event.'),
+          duration_minutes: z
+            .number()
+            .optional()
+            .describe('The new duration of the event in minutes.'),
+          attendees: z
+            .array(z.string().email())
+            .optional()
+            .describe('The new list of attendee email addresses.'),
         },
       },
       async ({
@@ -193,7 +236,6 @@ export class McpService {
         console.log(
           `Modificar evento: ${date}, ${client_email}, ${search_summary}, ${time}, ${title}, ${duration_minutes}`,
         );
-        // 1) Obtengo eventos donde el cliente es attendee
         const events = await this.calendarService.getEventsByAttendee(
           date,
           client_email,
@@ -213,7 +255,6 @@ export class McpService {
           };
         }
 
-        // 2) Busco el que coincida con el fragmento de título
         const match = search_summary
           ? events.find((e) =>
               e.summary.toLowerCase().includes(search_summary.toLowerCase()),
@@ -233,7 +274,6 @@ export class McpService {
           };
         }
 
-        // 3) Modifico usando el ID interno
         await this.calendarService.updateEvent(client_email, {
           date,
           time,
@@ -243,7 +283,6 @@ export class McpService {
           search_summary: '',
         });
 
-        // 4) Confirmación al cliente
         return {
           content: [
             {
@@ -254,42 +293,10 @@ export class McpService {
         };
       },
     );
-    // Prompt de ruteo
-    server.registerPrompt(
-      'route',
-      {
-        title: prompt.title,
-        description: prompt.description,
-        argsSchema: { userInput: z.string() },
-      },
-      ({ userInput }) => {
-        const manifest = this.toolsMeta
-          .map(
-            (t) => `• ${t.name}(${t.inputKeys.join(', ')}): ${t.description}`,
-          )
-          .join('\n');
 
-        const systemText = prompt.prompt
-          .replace('{{manifest}}', manifest)
-          .trim();
-
-        const messages = [
-          {
-            role: 'assistant' as const,
-            content: { type: 'text' as const, text: systemText },
-          },
-          {
-            role: 'user' as const,
-            content: { type: 'text' as const, text: userInput },
-          },
-        ];
-
-        return {
-          description: 'Prompt para decidir qué herramienta usar',
-          messages,
-        };
-      },
-    );
+    // El prompt 'route' en McpService ya no será usado por LangChain para el agent.
+    // Solo si otra parte de tu sistema lo usa, mantenlo.
+    // server.registerPrompt('route', { ... });
 
     return server;
   }
