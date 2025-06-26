@@ -4,7 +4,15 @@ import { ConfigService } from '@nestjs/config';
 import chalk from 'chalk';
 
 import { WhatsappService } from '../whatsapp/whatsapp.service';
-import { ChatMessage } from '../common/interfaces/chat-message';
+import { AgentService } from '../langchain/agent/agent.service'; // <--- Importa AgentService
+
+// Si ChatMessage está en `src/common/interfaces/chat-message.ts`, puedes importarla desde allí
+// Si la dejaste dentro de agent.service.ts, te sugiero moverla a un archivo compartido
+// como src/common/interfaces/chat-message.ts para que ambos servicios puedan usarla.
+export interface ChatMessage {
+  role: 'user' | 'assistant' | 'tool'; // Agregamos 'tool' para las respuestas de herramientas
+  content: string;
+}
 
 interface WhatsAppMessagePayload {
   object: string;
@@ -13,9 +21,9 @@ interface WhatsAppMessagePayload {
     changes: Array<{
       value: {
         messages?: Array<{
-          from: string;
-          id: string;
-          text?: { body: string };
+          from: string; // El número de teléfono del remitente
+          id: string; // ID único del mensaje de WhatsApp
+          text?: { body: string }; // Contenido del mensaje de texto
         }>;
       };
       field: string;
@@ -28,13 +36,10 @@ export class WhatsappWebhookController {
   private processedMessageIds = new Set<string>();
   private readonly DEDUPE_TTL_MS = 60 * 1000;
 
-  // Guarda el historial por remitente
-  private conversationHistory = new Map<string, ChatMessage[]>();
-  private readonly MAX_HISTORY = 10;
-
   constructor(
     private readonly whatsappService: WhatsappService,
     private readonly configService: ConfigService,
+    private readonly agentService: AgentService,
   ) {}
 
   private isDuplicate(id: string): boolean {
@@ -45,28 +50,22 @@ export class WhatsappWebhookController {
   }
 
   private async processIncomingMessage(from: string, text: string) {
-    console.log(chalk.blue(`[Recibido] ${from}: ${text}`));
+    console.log(chalk.blue(`[WhatsApp - Recibido] ${from}: ${text}`));
 
-    // 1) Recupera historial y añade mensaje
-    const history = this.conversationHistory.get(from) ?? [];
-    history.push({ role: 'user', content: text });
-    if (history.length > this.MAX_HISTORY) {
-      history.splice(0, history.length - this.MAX_HISTORY);
+    try {
+      const reply = await this.agentService.handleMessage(text, from);
+      await this.whatsappService.sendMessage(from, reply);
+      console.log(chalk.green(`[WhatsApp - Enviado] ${from}: ${reply}`));
+    } catch (error) {
+      console.error(
+        chalk.red(`[WhatsApp - Error] Fallo al procesar mensaje para ${from}:`),
+        error,
+      );
+      await this.whatsappService.sendMessage(
+        from,
+        'Lo siento, ha ocurrido un error y no puedo procesar tu solicitud en este momento.',
+      );
     }
-
-    // 2) Llama a OpenAIService PASANDOLE el historial completo
-    const reply = 'Hola';
-
-    // 3) Envía por WhatsApp sólo el texto resultante
-    await this.whatsappService.sendMessage(from, reply);
-    console.log(chalk.green(`[Enviado] ${from}: ${reply}`));
-
-    // 4) Guarda la respuesta en el historial
-    history.push({ role: 'assistant', content: reply });
-    if (history.length > this.MAX_HISTORY) {
-      history.splice(0, history.length - this.MAX_HISTORY);
-    }
-    this.conversationHistory.set(from, history);
   }
 
   @Get('webhook')
@@ -77,12 +76,28 @@ export class WhatsappWebhookController {
     const mode = req.query['hub.mode'];
     const token = req.query['hub.verify_token'];
     const challenge = req.query['hub.challenge'];
-    if (mode && token === VERIFY_TOKEN) {
-      console.log(chalk.green('Webhook VERIFICADO correctamente.'));
-      return res.status(200).send(challenge);
+
+    if (mode && token) {
+      if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+        console.log(
+          chalk.green('Webhook VERIFICADO correctamente (WhatsApp).'),
+        );
+        return res.status(200).send(challenge);
+      } else {
+        console.error(
+          chalk.red(
+            'Fallo verificación webhook (WhatsApp): Token o modo incorrecto.',
+          ),
+        );
+        return res.status(403).send('Forbidden: Token o modo incorrecto.');
+      }
     }
-    console.error(chalk.red('Fallo verificación webhook.'));
-    return res.status(403).send('Forbidden');
+    console.error(
+      chalk.red('Fallo verificación webhook (WhatsApp): Parámetros faltantes.'),
+    );
+    return res
+      .status(400)
+      .send('Bad Request: Parámetros de verificación faltantes.');
   }
 
   @Post('webhook')
@@ -93,13 +108,30 @@ export class WhatsappWebhookController {
       const change = entry?.changes?.[0];
 
       if (change?.field === 'messages') {
-        const m = change.value.messages?.[0];
-        if (m && !this.isDuplicate(m.id)) {
-          await this.processIncomingMessage(m.from, m.text?.body ?? '');
+        const message = change.value.messages?.[0];
+        if (
+          message &&
+          message.text &&
+          message.from &&
+          !this.isDuplicate(message.id)
+        ) {
+          await this.processIncomingMessage(message.from, message.text.body);
+        } else {
+          console.log(
+            chalk.yellow(
+              '[WhatsApp - Info] Mensaje no procesado (no es texto, duplicado, o falta info):',
+            ),
+            JSON.stringify(message),
+          );
         }
+      } else {
+        console.log(
+          chalk.gray('[WhatsApp - Info] Recibido otro tipo de cambio:'),
+          JSON.stringify(change),
+        );
       }
     } catch (err) {
-      console.error(chalk.red('Error procesando webhook:'), err);
+      console.error(chalk.red('Error procesando webhook de WhatsApp:'), err);
     }
     return res.status(200).send('EVENT_RECEIVED');
   }

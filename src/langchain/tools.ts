@@ -42,7 +42,7 @@ const CalendarGetToolInputSchema = z.object({
 export class CalendarGetTool extends StructuredTool<
   typeof CalendarGetToolInputSchema
 > {
-  name = 'Calendar_Get'; // Importante: el nombre debe coincidir con el registrado en McpService
+  name = 'Calendar_Get';
   description =
     'Useful for finding available time slots and planned events in the calendar on a specific date. Input should be a string representing the date in YYYY-MM-DD format, for example "2025-06-25". It considers working hours from 08:00 to 17:00, excluding 13:00-14:00 for lunch.';
 

@@ -112,8 +112,7 @@ export class AgentService implements OnModuleInit {
         chat_history: langChainChatHistory, // Pasa el historial aquí
       });
 
-      this.logger.log('Agent execution finished.');
-
+      this.logger.log('Agent result:', result);
       const output = result.output;
       const responseText = typeof output === 'string' ? output : String(output);
 
