@@ -7,7 +7,11 @@ import {
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import { OAuth2Client } from 'google-auth-library';
-
+export interface FormattedCalendarEvent {
+  start: string; // HH:MM
+  end: string; // HH:MM
+  title: string;
+}
 @Injectable()
 export class CalendarService {
   private readonly calendarId: string;
@@ -85,9 +89,9 @@ export class CalendarService {
     }
   }
 
-  async getEvents(
-    date: string,
-  ): Promise<Array<{ start: string; summary: string }>> {
+  // Dentro de tu clase CalendarService en src/calendar/calendar.service.ts
+
+  async getEvents(date: string): Promise<FormattedCalendarEvent[]> {
     if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       this.logger.error('Fecha inválida proporcionada');
       throw new ForbiddenException('Fecha inválida proporcionada');
@@ -99,13 +103,22 @@ export class CalendarService {
       this.logger.error('No se pudo obtener access token');
       throw new InternalServerErrorException('Error obteniendo access token');
     }
-    const timeMin = new Date(`${date}T00:00:00-05:00`).toISOString();
-    const timeMax = new Date(`${date}T23:59:59-05:00`).toISOString();
+    const startOfDay = new Date(`${date}T00:00:00`); // Crea fecha en la zona horaria local del servidor
+    const endOfDay = new Date(`${date}T23:59:59`); // Crea fecha en la zona horaria local del servidor
+
+    const timeMin = startOfDay.toISOString(); // Convierte a ISO string (generalmente UTC)
+    const timeMax = endOfDay.toISOString(); // Convierte a ISO string (generalmente UTC)
+    const googleCalendarTimeZone = 'America/Bogota';
+
     const url = `${this.baseUrl}/calendars/${this.calendarId}/events`;
     try {
+      this.logger.debug(
+        `[getEvents] Consultando eventos para la fecha: ${date} con timeMin: ${timeMin} y timeMax: ${timeMax}`,
+      );
       const { data } = await axios.get<{
         items: Array<{
           start: { dateTime?: string; date?: string };
+          end: { dateTime?: string; date?: string };
           summary?: string;
         }>;
       }>(url, {
@@ -114,27 +127,79 @@ export class CalendarService {
           timeMax,
           singleEvents: true,
           orderBy: 'startTime',
+          timeZone: googleCalendarTimeZone,
         },
         headers: { Authorization: `Bearer ${token}` },
       });
 
+      this.logger.debug(
+        `[getEvents] Respuesta RAW de Google Calendar: ${JSON.stringify(data, null, 2)}`,
+      );
+
       const items = data.items || [];
-      return items.map((e) => ({
-        start: e.start.dateTime || e.start.date || '',
-        summary: e.summary || '(Sin título)',
-      }));
+      const formattedEvents: FormattedCalendarEvent[] = [];
+      if (items.length === 0) {
+        this.logger.log(
+          `[CalendarService] No se encontraron eventos para ${date} después de la consulta API.`,
+        );
+      }
+
+      for (const e of items) {
+        const startDateTime = e.start?.dateTime;
+        const endDateTime = e.end?.dateTime;
+        const summary = e.summary || '(Sin título)';
+
+        if (startDateTime && endDateTime) {
+          // Parseamos las fechas que vienen de Google (ya estarán en la zona horaria correcta o ISO)
+          const startDate = new Date(startDateTime);
+          const endDate = new Date(endDateTime);
+
+          // Formateamos a HH:MM usando la zona horaria 'es-CO' para consistencia
+          const formattedStart = startDate.toLocaleTimeString('es-CO', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+          });
+          const formattedEnd = endDate.toLocaleTimeString('es-CO', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+          });
+
+          formattedEvents.push({
+            start: formattedStart,
+            end: formattedEnd,
+            title: summary,
+          });
+          this.logger.log(
+            `  - Evento Formateado: ${summary}, Inicio: ${formattedStart}, Fin: ${formattedEnd}`,
+          );
+        } else if (e.start?.date && e.end?.date) {
+          // Eventos de día completo (si es que quieres que bloqueen todo el día)
+          this.logger.log(
+            `  - Evento de día completo detectado: ${summary} el ${e.start.date}`,
+          );
+          // Para la lógica de "huecos", un evento de día completo significa que el día está ocupado
+          formattedEvents.push({
+            start: '00:00',
+            end: '23:59',
+            title: summary,
+          });
+        }
+      }
+      return formattedEvents;
     } catch (err) {
       if (axios.isAxiosError(err)) {
         this.logger.error(
-          `Error al consultar eventos (${err.response?.status})`,
-          JSON.stringify(err.response?.data),
+          `Error al consultar eventos (${err.response?.status}): ${JSON.stringify(err.response?.data)}`,
+          err.stack, // Añadimos el stack trace para mejor depuración
         );
-        throw new InternalServerErrorException(
-          `No se pudo consultar eventos: ${
+        if (err.response?.status === 401 || err.response?.status === 403) {
+          throw new ForbiddenException(
             // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-            err.response?.data?.error?.message || err.message
-          }`,
-        );
+            `Problema de autenticación/permisos con Google Calendar: ${err.response?.data?.error?.message || 'Token inválido o permisos insuficientes'}`,
+          );
+        }
       }
       this.logger.error('Error inesperado consultando eventos', err);
       throw new InternalServerErrorException(

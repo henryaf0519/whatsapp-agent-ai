@@ -1,5 +1,5 @@
 // src/mcp/mcp.service.ts
-import { Injectable } from '@nestjs/common';
+import { Injectable,Logger } from '@nestjs/common';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { EmailService } from '../../email/email.service';
@@ -45,6 +45,7 @@ export class McpService {
       ],
     },
   ];
+  private readonly logger = new Logger(McpService.name);
 
   constructor(
     private readonly emailService: EmailService,
@@ -133,40 +134,113 @@ export class McpService {
     server.registerTool(
       'Calendar_Get',
       {
-        title: 'Consultar calendario',
+        title: 'Consultar Horarios Disponibles en Calendario',
         description:
-          'Muestra tus eventos programados y los huecos libres de lunes a viernes entre 08:00 y 17:00 (excluye 13:00–14:00).',
+          'Muestra los **rangos de tiempo disponibles** en el calendario de lunes a viernes entre 08:00 y 17:00 (excluyendo la hora del almuerzo de 13:00 a 14:00). Devuelve una lista de los horarios exactos en los que se pueden agendar nuevas citas.',
         inputSchema: {
           date: z
             .string()
             .describe(
-              'The date to get calendar events for, in YYYY-MM-DD format.',
+              'La fecha específica en formato YYYY-MM-DD para la cual se desean consultar los horarios disponibles.',
             ),
         },
       },
       async ({ date }) => {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Por favor, proporciona una fecha válida en formato YYYY-MM-DD para consultar los horarios disponibles.`,
+              },
+            ],
+          };
+        }
+
         const events = await this.calendarService.getEvents(date);
-        const businessSlots = [
-          ...[8, 9, 10, 11, 12].map(
-            (h) => `${h.toString().padStart(2, '0')}:00`,
-          ),
-          ...[14, 15, 16].map((h) => `${h}:00`),
-        ];
-        const busySlots = events.map((e) => e.start);
-        const freeSlots = businessSlots.filter(
-          (slot) => !busySlots.includes(slot),
+
+        this.logger.log(
+          `Consultando horarios disponibles para la fecha: ${date}, eventos encontrados: ${JSON.stringify(events)}`,
         );
+        // Convertir los eventos a un formato que sea fácil de comparar por intervalos.
+        // Asumimos que events.start y events.end son 'HH:MM'
+        const busyIntervals = events.map((event) => {
+          // Si event.end no existe, asumimos que el evento dura 1 hora
+          const [startHour, startMinute] = event.start.split(':').map(Number);
+          let endHour: number, endMinute: number;
+          if ('end' in event && typeof event.end === 'string') {
+            [endHour, endMinute] = event.end.split(':').map(Number);
+          } else {
+            // Asume duración de 1 hora si no hay 'end'
+            endHour = startHour + 1;
+            endMinute = startMinute;
+          }
+          return {
+            startHour,
+            startMinute,
+            endHour,
+            endMinute,
+          };
+        });
+
+        const freeSlots: { start: string; end: string }[] = [];
+        // Iterar sobre cada hora de negocio (slots de 1 hora)
+        for (let h = 8; h < 17; h++) {
+          if (h === 13) continue; // Excluir la hora del almuerzo
+
+          const slotStartHour = h;
+          const slotEndHour = h + 1; // El slot de 8:00 a 9:00, termina en la hora 9.
+
+          let isFree = true;
+          for (const busy of busyIntervals) {
+            // Un slot de negocio está ocupado si un evento se superpone con él.
+            // Hay varias formas de superposición:
+            // 1. El evento empieza dentro del slot de negocio.
+            // 2. El evento termina dentro del slot de negocio.
+            // 3. El evento cubre completamente el slot de negocio.
+            // 4. El slot de negocio empieza dentro del evento.
+
+            // Para simplificar, si el inicio del evento es antes o igual al fin del slot del negocio,
+            // Y el fin del evento es después o igual al inicio del slot del negocio.
+            // Esto cubre la mayoría de los casos de superposición para slots de una hora.
+
+            // Convertir a minutos para una comparación más precisa si los eventos no son de horas exactas
+            const slotStartMinutes = slotStartHour * 60;
+            const slotEndMinutes = slotEndHour * 60; // Fin exclusivo
+            const busyStartMinutes = busy.startHour * 60 + busy.startMinute;
+            const busyEndMinutes = busy.endHour * 60 + busy.endMinute;
+
+            // Verificar si hay alguna superposición
+            // El slot está ocupado si:
+            // (inicio_slot < fin_busy) AND (fin_slot > inicio_busy)
+            if (
+              slotStartMinutes < busyEndMinutes &&
+              slotEndMinutes > busyStartMinutes
+            ) {
+              isFree = false;
+              break; // No es necesario revisar más eventos para este slot si ya está ocupado
+            }
+          }
+
+          if (isFree) {
+            freeSlots.push({
+              start: `${slotStartHour.toString().padStart(2, '0')}:00`,
+              end: `${slotEndHour.toString().padStart(2, '0')}:00`,
+            });
+          }
+        }
 
         if (freeSlots.length === 0) {
           return {
             content: [
               {
                 type: 'text',
-                text: `Lo siento, no hay franjas disponibles el ${date} entre las 08:00 y 17:00.`,
+                text: `Lo siento, no hay horarios disponibles para agendar el ${date} entre las 08:00 y 17:00. Por favor, ¿podrías elegir otra fecha?`,
               },
             ],
           };
         }
+
         return {
           content: [
             {
@@ -174,10 +248,7 @@ export class McpService {
               text:
                 `Estos son los horarios libres el ${date}:\n` +
                 freeSlots
-                  .map(
-                    (h) =>
-                      `• ${h}–${(parseInt(h) + 1).toString().padStart(2, '0')}:00`,
-                  )
+                  .map((slot) => `• ${slot.start} - ${slot.end}`)
                   .join('\n') +
                 `\n\nPor favor, indícame qué hora te va bien.`,
             },
