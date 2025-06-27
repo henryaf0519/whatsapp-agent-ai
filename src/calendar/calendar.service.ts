@@ -131,11 +131,6 @@ export class CalendarService {
         },
         headers: { Authorization: `Bearer ${token}` },
       });
-
-      this.logger.debug(
-        `[getEvents] Respuesta RAW de Google Calendar: ${JSON.stringify(data, null, 2)}`,
-      );
-
       const items = data.items || [];
       const formattedEvents: FormattedCalendarEvent[] = [];
       if (items.length === 0) {
@@ -171,9 +166,6 @@ export class CalendarService {
             end: formattedEnd,
             title: summary,
           });
-          this.logger.log(
-            `  - Evento Formateado: ${summary}, Inicio: ${formattedStart}, Fin: ${formattedEnd}`,
-          );
         } else if (e.start?.date && e.end?.date) {
           // Eventos de día completo (si es que quieres que bloqueen todo el día)
           this.logger.log(

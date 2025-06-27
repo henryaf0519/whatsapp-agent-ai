@@ -158,12 +158,6 @@ export class McpService {
         }
 
         const events = await this.calendarService.getEvents(date);
-
-        this.logger.log(
-          `Consultando horarios disponibles para la fecha: ${date}, eventos encontrados: ${JSON.stringify(events)}`,
-        );
-        // Convertir los eventos a un formato que sea fácil de comparar por intervalos.
-        // Asumimos que events.start y events.end son 'HH:MM'
         const busyIntervals = events.map((event) => {
           // Si event.end no existe, asumimos que el evento dura 1 hora
           const [startHour, startMinute] = event.start.split(':').map(Number);
@@ -193,35 +187,18 @@ export class McpService {
 
           let isFree = true;
           for (const busy of busyIntervals) {
-            // Un slot de negocio está ocupado si un evento se superpone con él.
-            // Hay varias formas de superposición:
-            // 1. El evento empieza dentro del slot de negocio.
-            // 2. El evento termina dentro del slot de negocio.
-            // 3. El evento cubre completamente el slot de negocio.
-            // 4. El slot de negocio empieza dentro del evento.
-
-            // Para simplificar, si el inicio del evento es antes o igual al fin del slot del negocio,
-            // Y el fin del evento es después o igual al inicio del slot del negocio.
-            // Esto cubre la mayoría de los casos de superposición para slots de una hora.
-
-            // Convertir a minutos para una comparación más precisa si los eventos no son de horas exactas
             const slotStartMinutes = slotStartHour * 60;
-            const slotEndMinutes = slotEndHour * 60; // Fin exclusivo
+            const slotEndMinutes = slotEndHour * 60;
             const busyStartMinutes = busy.startHour * 60 + busy.startMinute;
             const busyEndMinutes = busy.endHour * 60 + busy.endMinute;
-
-            // Verificar si hay alguna superposición
-            // El slot está ocupado si:
-            // (inicio_slot < fin_busy) AND (fin_slot > inicio_busy)
             if (
               slotStartMinutes < busyEndMinutes &&
               slotEndMinutes > busyStartMinutes
             ) {
               isFree = false;
-              break; // No es necesario revisar más eventos para este slot si ya está ocupado
+              break;
             }
           }
-
           if (isFree) {
             freeSlots.push({
               start: `${slotStartHour.toString().padStart(2, '0')}:00`,
@@ -229,7 +206,6 @@ export class McpService {
             });
           }
         }
-
         if (freeSlots.length === 0) {
           return {
             content: [
@@ -240,7 +216,6 @@ export class McpService {
             ],
           };
         }
-
         return {
           content: [
             {
