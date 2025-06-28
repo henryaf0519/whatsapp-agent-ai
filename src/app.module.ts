@@ -11,6 +11,8 @@ import { EmailController } from './email/email.controller';
 import { McpModule } from './mcp/mcp.module';
 import { AgentService } from './langchain/agent/agent.service';
 import { ChatModule } from './chat/chat.module';
+import { PruebaService } from './prueba/prueba.service';
+import { PruebaController } from './prueba/prueba/prueba.controller';
 
 @Module({
   imports: [
@@ -25,6 +27,7 @@ import { ChatModule } from './chat/chat.module';
     WhatsappController,
     WhatsappWebhookController,
     EmailController,
+    PruebaController,
   ],
   providers: [
     AppService,
@@ -32,6 +35,7 @@ import { ChatModule } from './chat/chat.module';
     EmailService,
     CalendarService,
     AgentService,
+    PruebaService,
   ],
 })
 export class AppModule {}
