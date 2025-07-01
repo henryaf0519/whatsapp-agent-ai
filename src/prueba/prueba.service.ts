@@ -36,8 +36,8 @@ export class PruebaService implements OnModuleInit {
       () => {
         console.log('Listing available psychologists...');
         return `1. Dra. Sofía Torres - Especialidad: Ansiedad - Precio: $100.000
-2. Dr. Juan Pérez - Especialidad: Depresión - Precio: $120.000
-Por favor, dime con cuál psicólogo te gustaría agendar la cita.`;
+  2. Dr. Juan Pérez - Especialidad: Depresión - Precio: $120.000
+  Por favor, dime con cuál psicólogo te gustaría agendar la cita.`;
       },
       {
         name: 'listPsychologists',
@@ -54,10 +54,10 @@ Por favor, dime con cuál psicólogo te gustaría agendar la cita.`;
         );
         // Simula horarios disponibles (en real, consulta Google Calendar)
         return `
-          '09:00 AM - 10:00 AM',
-          '11:00 AM - 12:00 PM',
-          '02:00 PM - 03:00 PM',
-        `;
+            '09:00 AM - 10:00 AM',
+            '11:00 AM - 12:00 PM',
+            '02:00 PM - 03:00 PM',
+          `;
       },
       {
         name: 'getAvailableSlots',
@@ -100,24 +100,24 @@ Por favor, dime con cuál psicólogo te gustaría agendar la cita.`;
           role: 'system',
           content: `Eres un asistente conversacional para la app Appodium. Tu tarea es ayudar al usuario a agendar una cita con uno de los psicólogos disponibles, siempre guiando la conversación paso a paso. 
 
-        **Reglas:**
-        - Saluda y da la bienvenida.
-        - Pregunta si desea agendar una cita.
-        - Si responde que sí, muestra la lista de psicólogos disponibles.
-        - Espera a que el usuario elija un psicólogo.
-        - Pide la fecha para la cita.
-        - Cuando la tengas, consulta los horarios disponibles para ese psicólogo y fecha.
-        - Espera a que el usuario elija la hora.
-        - Cuando la hora esté definida, crea la cita.
-        - Confirma la cita y despídete.
+          **Reglas:**
+          - Saluda y da la bienvenida.
+          - Pregunta si desea agendar una cita.
+          - Si responde que sí, muestra la lista de psicólogos disponibles.
+          - Espera a que el usuario elija un psicólogo.
+          - Pide la fecha para la cita.
+          - Cuando la tengas, consulta los horarios disponibles para ese psicólogo y fecha.
+          - Espera a que el usuario elija la hora.
+          - Cuando la hora esté definida, crea la cita.
+          - Confirma la cita y despídete.
 
-        **Muy importante:**
-        - Nunca asumas datos que el usuario no te haya dado.
-        - Haz preguntas cortas y claras.
-        - Si el usuario da información antes de que la pidas (ej: dice psicólogo y fecha en el mismo mensaje), procesa todo lo posible, pero igual confirma los pasos.
-        - Si el usuario da una respuesta ambigua, pídele aclarar.
-        - No muestres toda la información ni preguntes varias cosas a la vez.
-        - Sé amable y profesional.`,
+          **Muy importante:**
+          - Nunca asumas datos que el usuario no te haya dado.
+          - Haz preguntas cortas y claras.
+          - Si el usuario da información antes de que la pidas (ej: dice psicólogo y fecha en el mismo mensaje), procesa todo lo posible, pero igual confirma los pasos.
+          - Si el usuario da una respuesta ambigua, pídele aclarar.
+          - No muestres toda la información ni preguntes varias cosas a la vez.
+          - Sé amable y profesional.`,
         },
         ...state.messages,
       ]);
