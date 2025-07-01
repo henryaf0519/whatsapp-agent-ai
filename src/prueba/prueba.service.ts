@@ -8,7 +8,7 @@ import { MessagesAnnotation, StateGraph } from '@langchain/langgraph';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { ConfigService } from '@nestjs/config';
 import { Pinecone } from '@pinecone-database/pinecone';
-import { CalendarService} from '../calendar/calendar.service'; // Asegúrate de que dotenv esté instalado y configurado
+import { CalendarService } from '../calendar/calendar.service'; // Asegúrate de que dotenv esté instalado y configurado
 interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
@@ -94,6 +94,49 @@ export class PruebaService implements OnModuleInit {
         name: 'listPsychologists',
         description:
           'Muestra psicólogos disponibles para agendar cita, incluyendo especialidad y precio.',
+        schema: z.object({}),
+      },
+    );
+
+    const aboutAppodium = tool(
+      async (): Promise<string> => {
+        console.log('Que es appodium?');
+        const response = await namespace.searchRecords({
+          query: {
+            topK: 10,
+            inputs: { text: 'Que es Appodium?' },
+            filter: {
+              tipo: { $in: ['descripcion'] },
+            }, // Filtra
+          },
+          fields: ['text', 'tipo'],
+        });
+
+        const resultados = (response.result?.hits || [])
+          .map((hit) => {
+            // Asegura que hit.fields tiene la propiedad text de tipo string
+            const text = (hit.fields as { text?: string }).text ?? '';
+            // Ejemplo de campo: "Nombre | Especialidad. Descripción... Precio: $XX.XXX COP"
+            const match = text.match(
+              /^(.*?)\|([^.]*)\.\s*(.*?)Precio:\s*([$\d.,\sA-Za-z]+)/i,
+            );
+            if (match) {
+              const nombre = match[1].trim();
+              const especialidad = match[3];
+              const precio = match[4].trim();
+              return `• ${nombre} | ${especialidad} | Precio: ${precio}`;
+            }
+            // Si no hay match, retorna todo el texto
+            return `• ${text}`;
+          })
+          .join('\n\n');
+
+        return `Lista de psicólogos disponibles:\n\n${resultados}`;
+      },
+      {
+        name: 'aboutAppodium',
+        description:
+          'Provee una descripción clara sobre qué es Appodium, su misión, visión y funcionamiento.',
         schema: z.object({}),
       },
     );
@@ -216,7 +259,12 @@ export class PruebaService implements OnModuleInit {
       },
     );
 
-    this.tools = [listPsychologists, getAvailableSlots, createAppointment];
+    this.tools = [
+      aboutAppodium,
+      listPsychologists,
+      getAvailableSlots,
+      createAppointment,
+    ];
     this.llmWithTools = llm.bindTools(this.tools);
 
     // Función de llamada al LLM
@@ -245,7 +293,8 @@ export class PruebaService implements OnModuleInit {
           - Si el usuario da información antes de que la pidas (ej: dice psicólogo y fecha en el mismo mensaje), procesa todo lo posible, pero igual confirma los pasos.
           - Si el usuario da una respuesta ambigua, pídele aclarar.
           - No muestres toda la información ni preguntes varias cosas a la vez.
-          - Sé amable y profesional.`,
+          - Sé amable y profesional.
+          - Si preguntan sobre Appodium, llama a la herramienta aboutAppodium para explicar qué es la app.`,
         },
         ...state.messages,
       ]);
