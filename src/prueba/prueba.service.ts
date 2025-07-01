@@ -7,6 +7,8 @@ import { z } from 'zod';
 import { MessagesAnnotation, StateGraph } from '@langchain/langgraph';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { ConfigService } from '@nestjs/config';
+import { Pinecone } from '@pinecone-database/pinecone';
+import { CalendarService} from '../calendar/calendar.service'; // Asegúrate de que dotenv esté instalado y configurado
 interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
@@ -18,7 +20,10 @@ export class PruebaService implements OnModuleInit {
   private agentBuilder: any = null;
   private userHistories: Record<string, Message[]> = {};
 
-  constructor(private config: ConfigService) {
+  constructor(
+    private config: ConfigService,
+    private calendarService: CalendarService,
+  ) {
     if (!this.config.get<string>('OPENAI_API_KEY')) {
       throw new Error('OPENAI_API_KEY no configurada');
     }
@@ -31,33 +36,146 @@ export class PruebaService implements OnModuleInit {
       openAIApiKey: this.config.get<string>('OPENAI_API_KEY'),
       modelName: 'gpt-4o', // o el modelo que prefieras
     });
+    const pineconeApiKey = this.config.get<string>('PINECONE_API_KEY');
+    const pineconeIndex = this.config.get<string>('PINECONE_INDEX');
+    const pineconeHost = this.config.get<string>('PINECONE_HOST');
+    if (!pineconeApiKey) {
+      throw new Error('PINECONE_API_KEY no configurada');
+    }
+    if (!pineconeIndex) {
+      throw new Error('PINECONE_INDEX no configurada');
+    }
+    if (!pineconeHost) {
+      throw new Error('PINECONE_HOST no configurada');
+    }
+    const pc = new Pinecone({
+      apiKey: pineconeApiKey,
+    });
+    const namespace = pc
+      .index(pineconeIndex, pineconeHost)
+      .namespace('example-namespace');
 
     const listPsychologists = tool(
-      () => {
+      async (): Promise<string> => {
         console.log('Listing available psychologists...');
-        return `1. Dra. Sofía Torres - Especialidad: Ansiedad - Precio: $100.000
-  2. Dr. Juan Pérez - Especialidad: Depresión - Precio: $120.000
-  Por favor, dime con cuál psicólogo te gustaría agendar la cita.`;
+        const response = await namespace.searchRecords({
+          query: {
+            topK: 10,
+            inputs: { text: 'Psicologos' },
+            filter: {
+              tipo: { $in: ['psicologo'] },
+            }, // Filtra
+          },
+          fields: ['text', 'tipo'],
+        });
+
+        const resultados = (response.result?.hits || [])
+          .map((hit) => {
+            // Asegura que hit.fields tiene la propiedad text de tipo string
+            const text = (hit.fields as { text?: string }).text ?? '';
+            // Ejemplo de campo: "Nombre | Especialidad. Descripción... Precio: $XX.XXX COP"
+            const match = text.match(
+              /^(.*?)\|([^.]*)\.\s*(.*?)Precio:\s*([$\d.,\sA-Za-z]+)/i,
+            );
+            if (match) {
+              const nombre = match[1].trim();
+              const especialidad = match[3];
+              const precio = match[4].trim();
+              return `• ${nombre} | ${especialidad} | Precio: ${precio}`;
+            }
+            // Si no hay match, retorna todo el texto
+            return `• ${text}`;
+          })
+          .join('\n\n');
+
+        return `Lista de psicólogos disponibles:\n\n${resultados}`;
       },
       {
         name: 'listPsychologists',
-        description: 'Muestra psicólogos disponibles para agendar cita.',
+        description:
+          'Muestra psicólogos disponibles para agendar cita, incluyendo especialidad y precio.',
         schema: z.object({}),
       },
     );
 
     const getAvailableSlots = tool(
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      ({ psychologist, date }) => {
+      async ({ psychologist, date }) => {
         console.log(
           `Obteniendo horarios disponibles para ${psychologist} en ${date}...`,
         );
-        // Simula horarios disponibles (en real, consulta Google Calendar)
-        return `
-            '09:00 AM - 10:00 AM',
-            '11:00 AM - 12:00 PM',
-            '02:00 PM - 03:00 PM',
-          `;
+        const events = await this.calendarService.getEvents(date);
+        const busyIntervals = events.map((event) => {
+          // Si event.end no existe, asumimos que el evento dura 1 hora
+          const [startHour, startMinute] = event.start.split(':').map(Number);
+          let endHour: number, endMinute: number;
+          if ('end' in event && typeof event.end === 'string') {
+            [endHour, endMinute] = event.end.split(':').map(Number);
+          } else {
+            // Asume duración de 1 hora si no hay 'end'
+            endHour = startHour + 1;
+            endMinute = startMinute;
+          }
+          return {
+            startHour,
+            startMinute,
+            endHour,
+            endMinute,
+          };
+        });
+
+        const freeSlots: { start: string; end: string }[] = [];
+        // Iterar sobre cada hora de negocio (slots de 1 hora)
+        for (let h = 8; h < 17; h++) {
+          if (h === 13) continue; // Excluir la hora del almuerzo
+
+          const slotStartHour = h;
+          const slotEndHour = h + 1; // El slot de 8:00 a 9:00, termina en la hora 9.
+
+          let isFree = true;
+          for (const busy of busyIntervals) {
+            const slotStartMinutes = slotStartHour * 60;
+            const slotEndMinutes = slotEndHour * 60;
+            const busyStartMinutes = busy.startHour * 60 + busy.startMinute;
+            const busyEndMinutes = busy.endHour * 60 + busy.endMinute;
+            if (
+              slotStartMinutes < busyEndMinutes &&
+              slotEndMinutes > busyStartMinutes
+            ) {
+              isFree = false;
+              break;
+            }
+          }
+          if (isFree) {
+            freeSlots.push({
+              start: `${slotStartHour.toString().padStart(2, '0')}:00`,
+              end: `${slotEndHour.toString().padStart(2, '0')}:00`,
+            });
+          }
+        }
+        if (freeSlots.length === 0) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Lo siento, no hay horarios disponibles para agendar el ${date} entre las 08:00 y 17:00. Por favor, ¿podrías elegir otra fecha?`,
+              },
+            ],
+          };
+        }
+        return {
+          content: [
+            {
+              type: 'text',
+              text:
+                `Estos son los horarios libres el ${date}:\n` +
+                freeSlots
+                  .map((slot) => `• ${slot.start} - ${slot.end}`)
+                  .join('\n') +
+                `\n\nPor favor, indícame qué hora te va bien.`,
+            },
+          ],
+        };
       },
       {
         name: 'getAvailableSlots',
@@ -71,9 +189,16 @@ export class PruebaService implements OnModuleInit {
     );
 
     const createAppointment = tool(
-      ({ psychologist, date, hour, clientName }) => {
+      async ({ psychologist, date, hour, clientName, email }) => {
         console.log(
-          `Agendando cita con ${psychologist} el ${date} a las ${hour} para ${clientName}...`,
+          `Agendando cita con ${psychologist} el ${date} a las ${hour} a nombre de ${clientName} (${email})...`,
+        );
+        await this.calendarService.createEvent(
+          date,
+          hour,
+          'Cita con Pscicólogo(a) ' + psychologist,
+          60,
+          [email],
         );
         return `✅ Cita agendada con ${psychologist} el ${date} a las ${hour} a nombre de ${clientName}`;
       },
@@ -86,6 +211,7 @@ export class PruebaService implements OnModuleInit {
           date: z.string(),
           hour: z.string(),
           clientName: z.string(),
+          email: z.string().email(),
         }),
       },
     );
@@ -108,7 +234,9 @@ export class PruebaService implements OnModuleInit {
           - Pide la fecha para la cita.
           - Cuando la tengas, consulta los horarios disponibles para ese psicólogo y fecha.
           - Espera a que el usuario elija la hora.
-          - Cuando la hora esté definida, crea la cita.
+          - Cuando la hora esté definida
+          - Pregunta el nombre del cliente y el email
+          - Agenda la cita en Google Calendar.
           - Confirma la cita y despídete.
 
           **Muy importante:**
