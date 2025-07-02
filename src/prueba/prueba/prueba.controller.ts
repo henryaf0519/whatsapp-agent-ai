@@ -8,7 +8,8 @@ export class PruebaController {
 
   @Post()
   async handleMessage(@Body('message') message: string) {
+    console.log('Received message:', message);
     const reply = await this.chatbotService.conversar('1', message);
-    return { reply };
+    return { response: reply };
   }
 }

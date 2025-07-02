@@ -5,6 +5,11 @@ declare const module: any;
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  app.enableCors({
+    origin: '*', // Para desarrollo. Usa el dominio específico en producción.
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+    credentials: true,
+  });
   await app.listen(process.env.PORT ?? 3000);
   // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
   if (module.hot) {

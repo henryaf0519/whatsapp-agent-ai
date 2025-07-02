@@ -34,8 +34,15 @@ export class PruebaService implements OnModuleInit {
     // Instancia el modelo LLM
     const llm = new ChatOpenAI({
       openAIApiKey: this.config.get<string>('OPENAI_API_KEY'),
-      modelName: 'gpt-4o', // o el modelo que prefieras
+      modelName: 'gpt-4o-mini', // o el modelo que prefieras
     });
+    llm.callbacks = [
+      {
+        handleLLMStart: (llm, prompts) => {
+          console.log('Prompt real enviado:', prompts);
+        },
+      },
+    ];
     const pineconeApiKey = this.config.get<string>('PINECONE_API_KEY');
     const pineconeIndex = this.config.get<string>('PINECONE_INDEX');
     const pineconeHost = this.config.get<string>('PINECONE_HOST');
@@ -352,7 +359,7 @@ export class PruebaService implements OnModuleInit {
     });
 
     // Opcional: limita el historial a los últimos N mensajes para ahorrar tokens
-    const MAX_HISTORY = 12;
+    const MAX_HISTORY = 6;
     const messagesToSend = this.userHistories[userId].slice(-MAX_HISTORY);
 
     // Ejecuta el agente con todo el historial relevante
