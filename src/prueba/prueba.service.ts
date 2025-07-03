@@ -9,6 +9,7 @@ import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { ConfigService } from '@nestjs/config';
 import { Pinecone } from '@pinecone-database/pinecone';
 import { CalendarService } from '../calendar/calendar.service'; // Asegúrate de que dotenv esté instalado y configurado
+import { trimMessages } from '@langchain/core/messages';
 interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
@@ -19,6 +20,7 @@ export class PruebaService implements OnModuleInit {
   private tools!: any[];
   private agentBuilder: any = null;
   private userHistories: Record<string, Message[]> = {};
+  private tokenCounter: number = 0;
 
   constructor(
     private config: ConfigService,
@@ -276,35 +278,24 @@ export class PruebaService implements OnModuleInit {
 
     // Función de llamada al LLM
     const llmCall = async (state: typeof MessagesAnnotation.State) => {
+      const trimmedMessages = await trimMessages(state.messages, {
+        maxTokens: 250,
+        strategy: 'last',
+        tokenCounter: new ChatOpenAI({
+          openAIApiKey: this.config.get<string>('OPENAI_API_KEY'),
+          modelName: 'gpt-4o-mini',
+        }),
+      });
+      console.log('Mensajes después de recortar:', trimmedMessages);
       const result = await this.llmWithTools.invoke([
         {
           role: 'system',
-          content: `Eres un asistente conversacional para la app Appodium. Tu tarea es ayudar al usuario a agendar una cita con uno de los psicólogos disponibles, siempre guiando la conversación paso a paso. 
-
-          **Reglas:**
-          - Saluda y da la bienvenida.
-          - Pregunta si desea agendar una cita.
-          - Si responde que sí, muestra la lista de psicólogos disponibles.
-          - Espera a que el usuario elija un psicólogo.
-          - Pide la fecha para la cita.
-          - Cuando la tengas, consulta los horarios disponibles para ese psicólogo y fecha.
-          - Espera a que el usuario elija la hora.
-          - Cuando la hora esté definida
-          - Pregunta el nombre del cliente y el email
-          - Agenda la cita en Google Calendar.
-          - Confirma la cita y despídete.
-
-          **Muy importante:**
-          - Nunca asumas datos que el usuario no te haya dado.
-          - Haz preguntas cortas y claras.
-          - Si el usuario da información antes de que la pidas (ej: dice psicólogo y fecha en el mismo mensaje), procesa todo lo posible, pero igual confirma los pasos.
-          - Si el usuario da una respuesta ambigua, pídele aclarar.
-          - No muestres toda la información ni preguntes varias cosas a la vez.
-          - Sé amable y profesional.
-          - Si preguntan sobre Appodium, llama a la herramienta aboutAppodium para explicar qué es la app.`,
+          content: `"Eres un asistente de Appodium. Ayuda a agendar citas con psicólogos. Saluda y pregunta si desean una cita, muestra psicólogos disponibles, pregunta fecha para obtener citas disponibles y luego pide nombre y correo para crear cita`,
         },
-        ...state.messages,
+        ...trimmedMessages,
       ]);
+      console.log('Respuesta del LLM:', result.response_metadata.usage);
+      this.calcular(result.response_metadata.usage.total_tokens);
       return { messages: [result] };
     };
     const toolNode = new ToolNode(this.tools);
@@ -333,17 +324,10 @@ export class PruebaService implements OnModuleInit {
   }
 
   // Método público para usar el agente
-  async calcular(mensaje: string) {
-    const messages = [
-      {
-        role: 'user',
-        content: mensaje,
-      },
-    ];
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
-    const result = await this.agentBuilder.invoke({ messages });
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call
-    return result.messages.at(-1)?.content || 'No response from agent';
+  calcular(total_tokens: any) {
+    console.log('Calculando tokens utilizados...: ', total_tokens);
+    this.tokenCounter = this.tokenCounter + total_tokens || 0;
+    console.log('Tokens utilizados:', this.tokenCounter);
   }
 
   async conversar(userId: string, mensaje: string) {
