@@ -4,7 +4,11 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { ChatOpenAI } from '@langchain/openai';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
-import { MessagesAnnotation, StateGraph } from '@langchain/langgraph';
+import {
+  MessagesAnnotation,
+  StateGraph,
+  MemorySaver,
+} from '@langchain/langgraph';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { ConfigService } from '@nestjs/config';
 import { Pinecone } from '@pinecone-database/pinecone';
@@ -279,12 +283,10 @@ export class PruebaService implements OnModuleInit {
     // Función de llamada al LLM
     const llmCall = async (state: typeof MessagesAnnotation.State) => {
       const trimmedMessages = await trimMessages(state.messages, {
-        maxTokens: 250,
+        maxTokens: 10,
         strategy: 'last',
-        tokenCounter: new ChatOpenAI({
-          openAIApiKey: this.config.get<string>('OPENAI_API_KEY'),
-          modelName: 'gpt-4o-mini',
-        }),
+        tokenCounter: (msgs) => msgs.length,
+        includeSystem: true,
       });
       console.log('Mensajes después de recortar:', trimmedMessages);
       const result = await this.llmWithTools.invoke([
@@ -320,7 +322,7 @@ export class PruebaService implements OnModuleInit {
         __end__: '__end__',
       })
       .addEdge('tools', 'llmCall')
-      .compile();
+      .compile({ checkpointer: new MemorySaver() });
   }
 
   // Método público para usar el agente
@@ -331,34 +333,23 @@ export class PruebaService implements OnModuleInit {
   }
 
   async conversar(userId: string, mensaje: string) {
-    // Inicializa el historial del usuario si no existe
-    if (!this.userHistories[userId]) {
-      this.userHistories[userId] = [];
-    }
-
-    // Agrega el mensaje del usuario al historial
-    this.userHistories[userId].push({
-      role: 'user',
-      content: mensaje,
-    });
-
-    // Opcional: limita el historial a los últimos N mensajes para ahorrar tokens
-    const MAX_HISTORY = 6;
-    const messagesToSend = this.userHistories[userId].slice(-MAX_HISTORY);
-
     // Ejecuta el agente con todo el historial relevante
-    const result = await this.agentBuilder.invoke({ messages: messagesToSend });
-
-    // Agrega la respuesta de la IA al historial
-    if (result.messages.at(-1)?.content) {
-      this.userHistories[userId].push({
-        role: 'assistant',
-        content: result.messages.at(-1).content,
-      });
-    }
-
-    // Devuelve la última respuesta de la IA
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call
-    return result.messages.at(-1)?.content || 'No response from agent';
+    const result = await this.agentBuilder.invoke(
+      {
+        messages: [
+          {
+            role: 'user',
+            content: mensaje,
+          },
+        ],
+      },
+      {
+        configurable: { thread_id: '1' },
+      },
+    );
+    const lastContent = result.messages.at(-1)?.content;
+    return typeof lastContent === 'string'
+      ? lastContent
+      : 'No response from agent';
   }
 }
