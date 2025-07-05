@@ -13,7 +13,11 @@ import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { ConfigService } from '@nestjs/config';
 import { Pinecone } from '@pinecone-database/pinecone';
 import { CalendarService } from '../calendar/calendar.service'; // Asegúrate de que dotenv esté instalado y configurado
-import { trimMessages } from '@langchain/core/messages';
+import {
+  trimMessages,
+  RemoveMessage,
+  BaseMessage,
+} from '@langchain/core/messages';
 interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
@@ -42,13 +46,10 @@ export class PruebaService implements OnModuleInit {
       openAIApiKey: this.config.get<string>('OPENAI_API_KEY'),
       modelName: 'gpt-4o-mini', // o el modelo que prefieras
     });
-    llm.callbacks = [
-      {
-        handleLLMStart: (llm, prompts) => {
-          console.log('Prompt real enviado:', prompts);
-        },
-      },
-    ];
+    const llmSumarize = new ChatOpenAI({
+      openAIApiKey: this.config.get<string>('OPENAI_API_KEY'),
+      modelName: 'gpt-3.5-turbo', // o el modelo que prefieras
+    });
     const pineconeApiKey = this.config.get<string>('PINECONE_API_KEY');
     const pineconeIndex = this.config.get<string>('PINECONE_INDEX');
     const pineconeHost = this.config.get<string>('PINECONE_HOST');
@@ -282,22 +283,56 @@ export class PruebaService implements OnModuleInit {
 
     // Función de llamada al LLM
     const llmCall = async (state: typeof MessagesAnnotation.State) => {
+      const systemPrompt =
+        'Eres un asistente de Appodium. Ayuda a agendar citas con psicólogos. Saluda y pregunta si desean una cita, muestra psicólogos disponibles, pregunta fecha para obtener citas disponibles y luego pide nombre y correo para crear cita';
+      const systemMessage = { role: 'system', content: systemPrompt };
       const trimmedMessages = await trimMessages(state.messages, {
-        maxTokens: 10,
+        maxTokens: 20,
         strategy: 'last',
         tokenCounter: (msgs) => msgs.length,
         includeSystem: true,
       });
-      console.log('Mensajes después de recortar:', trimmedMessages);
+
       const result = await this.llmWithTools.invoke([
-        {
-          role: 'system',
-          content: `"Eres un asistente de Appodium. Ayuda a agendar citas con psicólogos. Saluda y pregunta si desean una cita, muestra psicólogos disponibles, pregunta fecha para obtener citas disponibles y luego pide nombre y correo para crear cita`,
-        },
+        systemMessage,
         ...trimmedMessages,
       ]);
-      console.log('Respuesta del LLM:', result.response_metadata.usage);
       this.calcular(result.response_metadata.usage.total_tokens);
+      if (result.tool_calls && result.tool_calls.length > 0) {
+        console.log(
+          "LLM ha solicitado herramientas. El grafo continuará con 'tools'.",
+        );
+        return { messages: [result] };
+      }
+      if (trimmedMessages.length >= 6) {
+        console.log(
+          'Conversación lo suficientemente larga y sin tool_calls. Iniciando resumen...',
+          trimmedMessages,
+        );
+
+        const summaryPrompt =
+          'Resume la siguiente conversación extrayendo los datos de la cita agendada (Nombre, Email, Profesional, Fecha, Hora, Precio) en una lista.';
+        const summaryMessage = await llmSumarize.invoke([
+          ...trimmedMessages, // Pasa solo los mensajes relevantes para el resumen
+          { role: 'user', content: summaryPrompt }, // El prompt de resumen como un mensaje de usuario
+        ]);
+
+        const deleteMessages = trimmedMessages
+          .filter((m) => typeof m.id === 'string')
+          .map((m) => new RemoveMessage({ id: m.id as string }));
+
+        this.calcular(summaryMessage.usage_metadata?.total_tokens);
+        return {
+          messages: [summaryMessage, result, ...deleteMessages],
+        };
+      }
+
+      // --- Paso final: Retornar la respuesta directa del LLM si no hubo tool_calls ni resumen ---
+      // Si no se cumplen las condiciones para una llamada a herramienta o para resumir,
+      // simplemente devolvemos la respuesta directa del LLM.
+      console.log(
+        'LLM ha respondido directamente sin tool_calls y sin necesidad de resumen.',
+      );
       return { messages: [result] };
     };
     const toolNode = new ToolNode(this.tools);
