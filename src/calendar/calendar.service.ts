@@ -41,6 +41,9 @@ export class CalendarService {
     durationMinutes = 60,
     guestEmails: string[] = [],
   ): Promise<unknown> {
+    console.log(
+      `Creando evento: ${title} el ${date} a las ${time} por ${durationMinutes} minutos`,
+    );
     const res = await this.oauth2Client.getAccessToken();
     const token = res.token;
     if (!token) {
@@ -62,6 +65,8 @@ export class CalendarService {
     if (guestEmails.length) {
       body.attendees = guestEmails.map((email) => ({ email }));
     }
+
+    this.logger.debug(`Creando evento: body: ${JSON.stringify(body, null, 2)}`);
 
     const url = `${this.baseUrl}/calendars/${this.calendarId}/events?sendUpdates=all`;
     try {

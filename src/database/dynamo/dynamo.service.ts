@@ -247,12 +247,41 @@ export class DynamoService {
     }
   }
 
-  async crearCita(date, hour, psychologistId, email) {
-    if (!(await this.huecoDisponible(date, hour, psychologistId)))
+  async crearCita(date, hour, name, email) {
+    console.log(
+      `Creando cita para ${name} el ${date} a las ${hour} con email ${email}...`,
+    );
+    const psicologo = await this.obtenerPsicologoPorNombre(
+      normalizeString(name),
+    );
+    if (!psicologo || psicologo instanceof Error) {
+      throw new Error('Psicólogo no encontrado');
+    }
+    if (!(await this.huecoDisponible(date, hour, psicologo.psychologistId)))
       return {
         success: false,
         message: 'El hueco seleccionado ya está ocupado.',
       };
-    return await this.createAppointment(date, hour, psychologistId, email);
+    const resp = await this.createAppointment(
+      date,
+      hour,
+      psicologo.psychologistId,
+      email,
+    );
+    if (!resp.success) {
+      return {
+        success: false,
+        message: resp.message || 'Error al crear la cita',
+      };
+    }
+    console.log(
+      `Cita creada para ${name} el ${date} a las ${hour} con email ${email}.`,
+    );
+    console.log('Psicólogo:', psicologo);
+    return {
+      success: true,
+      message: 'Cita creada con éxito',
+      psicologo: psicologo.email,
+    };
   }
 }

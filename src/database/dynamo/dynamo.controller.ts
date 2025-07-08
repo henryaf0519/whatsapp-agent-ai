@@ -17,14 +17,4 @@ export class DynamoController {
       payload.fecha,
     );
   }
-
-  @Post('appointment')
-  async createAppointment(@Body() payload: Record<string, any>) {
-    return this.dynamoService.crearCita(
-      payload.date,
-      payload.hour,
-      payload.psychologistId,
-      payload.email,
-    );
-  }
 }

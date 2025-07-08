@@ -174,19 +174,31 @@ export class PruebaService implements OnModuleInit {
         console.log(
           `Agendando cita con ${psychologist} el ${date} a las ${hour} a nombre de ${clientName} (${email})...`,
         );
-        await this.calendarService.createEvent(
+        const result = await this.dynamoService.crearCita(
           date,
           hour,
-          'Cita con Pscicólogo(a) ' + psychologist,
-          60,
-          [email],
+          psychologist,
+          email,
         );
-        return `✅ Cita agendada con ${psychologist} el ${date} a las ${hour} a nombre de ${clientName}`;
+        console.log('Resultado de crearCita:', result);
+        if (result.success) {
+          await this.calendarService.createEvent(
+            date,
+            hour,
+            'Cita con Pscicólogo(a) ' + psychologist,
+            60,
+            [email, result.psicologo],
+          );
+          return `✅ Cita agendada con ${psychologist} el ${date} a las ${hour} a nombre de ${clientName}`;
+        } else {
+          console.error('Error al crear la cita:', result.message);
+          return `❌ Error al agendar cita: ${result.message}`;
+        }
       },
       {
         name: 'createAppointment',
         description:
-          'Agenda una cita en Google Calendar con el psicólogo elegido.',
+          'Agenda una cita en Google Calendar con el psicólogo elegido. Debe recibir el id del psicólogo, fecha, hora, nombre del cliente y correo electrónico.',
         schema: z.object({
           psychologist: z.string(),
           date: z.string(),
@@ -229,11 +241,6 @@ export class PruebaService implements OnModuleInit {
         return { messages: [result] };
       }
       if (trimmedMessages.length >= 6) {
-        console.log(
-          'Conversación lo suficientemente larga y sin tool_calls. Iniciando resumen...',
-          trimmedMessages,
-        );
-
         const summaryPrompt =
           'Resume la siguiente conversación extrayendo los datos de la cita agendada (Nombre, Email, Profesional, Fecha, Hora, Precio) en una lista.';
         const summaryMessage = await llmSumarize.invoke([
@@ -254,9 +261,6 @@ export class PruebaService implements OnModuleInit {
       // --- Paso final: Retornar la respuesta directa del LLM si no hubo tool_calls ni resumen ---
       // Si no se cumplen las condiciones para una llamada a herramienta o para resumir,
       // simplemente devolvemos la respuesta directa del LLM.
-      console.log(
-        'LLM ha respondido directamente sin tool_calls y sin necesidad de resumen.',
-      );
       return { messages: [result] };
     };
     const toolNode = new ToolNode(this.tools);
