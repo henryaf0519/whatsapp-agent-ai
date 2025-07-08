@@ -180,15 +180,18 @@ export class PruebaService implements OnModuleInit {
           psychologist,
           email,
         );
-        console.log('Resultado de crearCita:', result);
         if (result.success) {
-          await this.calendarService.createEvent(
+          const response = await this.calendarService.createEvent(
             date,
             hour,
             'Cita con Pscicólogo(a) ' + psychologist,
             60,
             [email, result.psicologo],
           );
+          if (!response) {
+            console.error('Error al crear el evento en Google Calendar');
+            return '❌ Error al agendar cita: No se pudo crear el evento en Google Calendar';
+          }
           return `✅ Cita agendada con ${psychologist} el ${date} a las ${hour} a nombre de ${clientName}`;
         } else {
           console.error('Error al crear la cita:', result.message);
