@@ -156,7 +156,33 @@ export class PruebaService implements OnModuleInit {
         console.log(
           `Obteniendo horarios disponibles para ${psychologist} en ${date}...`,
         );
-        return this.dynamoService.obtenerHuecosDisponibles(psychologist, date);
+        try {
+          const availableSlots =
+            await this.dynamoService.obtenerHuecosDisponibles(
+              psychologist,
+              date,
+            );
+
+          if (!availableSlots || availableSlots.length === 0) {
+            console.warn(
+              `No se encontraron horarios disponibles para ${psychologist} en la fecha ${date}.`,
+            );
+            return `❌ No hay horarios disponibles para agendar el ${date}. Por favor, elige otra fecha.`;
+          }
+          return availableSlots;
+        } catch (error: unknown) {
+          if (error instanceof Error) {
+            console.error(
+              `Error al obtener horarios disponibles para ${psychologist} el ${date}: ${error.message}`,
+            );
+            return `❌ Error al obtener horarios disponibles: ${error.message}`;
+          } else {
+            console.error(
+              'Error desconocido al obtener los horarios disponibles.',
+            );
+            return '❌ Ocurrió un error inesperado al intentar obtener los horarios disponibles.';
+          }
+        }
       },
       {
         name: 'getAvailableSlots',
@@ -174,34 +200,42 @@ export class PruebaService implements OnModuleInit {
         console.log(
           `Agendando cita con ${psychologist} el ${date} a las ${hour} a nombre de ${clientName} (${email})...`,
         );
-        const result = await this.dynamoService.crearCita(
-          date,
-          hour,
-          psychologist,
-          email,
-        );
-        if (result.success) {
-          const response = await this.calendarService.createEvent(
+        try {
+          const result = await this.dynamoService.crearCita(
+            date,
+            hour,
+            psychologist,
+            email,
+          );
+
+          if (!result.success) {
+            throw new Error(result.message);
+          }
+          const calendarResponse = await this.calendarService.createEvent(
             date,
             hour,
             'Cita con Pscicólogo(a) ' + psychologist,
             60,
             [email, result.psicologo],
           );
-          if (!response) {
-            console.error('Error al crear el evento en Google Calendar');
-            return '❌ Error al agendar cita: No se pudo crear el evento en Google Calendar';
+          if (!calendarResponse) {
+            throw new Error('No se pudo crear el evento en Google Calendar');
           }
           return `✅ Cita agendada con ${psychologist} el ${date} a las ${hour} a nombre de ${clientName}`;
-        } else {
-          console.error('Error al crear la cita:', result.message);
-          return `❌ Error al agendar cita: ${result.message}`;
+        } catch (error: unknown) {
+          if (error instanceof Error) {
+            console.error('Error al agendar cita:', error.message);
+            return `❌ Error al agendar cita: ${error.message}`;
+          } else {
+            console.error('Error al agendar cita: Error desconocido');
+            return `❌ Error al agendar cita: Ocurrió un error inesperado`;
+          }
         }
       },
       {
         name: 'createAppointment',
         description:
-          'Agenda una cita en Google Calendar con el psicólogo elegido. Debe recibir el id del psicólogo, fecha, hora, nombre del cliente y correo electrónico.',
+          'Agenda una cita en Google Calendar con el psicólogo elegido. Debe recibir el psicólogo, fecha, hora, nombre del cliente y correo electrónico.',
         schema: z.object({
           psychologist: z.string(),
           date: z.string(),

@@ -147,13 +147,6 @@ export class DynamoService {
   }
 
   async obtenerHuecosDisponibles(name: string, fecha) {
-    console.log(
-      'Obteniendo huecos disponibles para:',
-      name,
-      'en fecha:',
-      fecha,
-    );
-    console.log('Psicologo:', normalizeString(name));
     const psicologo = await this.obtenerPsicologoPorNombre(
       normalizeString(name),
     );
@@ -161,7 +154,6 @@ export class DynamoService {
       throw new Error('Psicólogo no encontrado');
     }
     const horario = await this.obtenerHorarios(psicologo.psychologistId);
-    console.log('Horario:', horario);
     if (!horario) return [];
     const slots = this.generarSlots(
       horario.startHour,
@@ -171,9 +163,7 @@ export class DynamoService {
       horario.breakEnd,
       fecha,
     );
-    console.log('Slots generados:', slots);
     const ocupadas = await this.obtenerCitasOcupadas(psicologo.id, fecha);
-    console.log('Citas ocupadas:', ocupadas);
     return (await slots)
       .filter((slot) => !ocupadas.has(slot)) // Filtra los slots que no están ocupados
       .map((slot) => {
@@ -248,9 +238,6 @@ export class DynamoService {
   }
 
   async crearCita(date, hour, name, email) {
-    console.log(
-      `Creando cita para ${name} el ${date} a las ${hour} con email ${email}...`,
-    );
     const psicologo = await this.obtenerPsicologoPorNombre(
       normalizeString(name),
     );
@@ -274,10 +261,6 @@ export class DynamoService {
         message: resp.message || 'Error al crear la cita',
       };
     }
-    console.log(
-      `Cita creada para ${name} el ${date} a las ${hour} con email ${email}.`,
-    );
-    console.log('Psicólogo:', psicologo);
     return {
       success: true,
       message: 'Cita creada con éxito',
