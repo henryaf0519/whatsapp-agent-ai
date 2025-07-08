@@ -8,9 +8,6 @@ import { ConfigModule } from '@nestjs/config';
 import { EmailService } from './email/email.service';
 import { CalendarService } from './calendar/calendar.service';
 import { EmailController } from './email/email.controller';
-import { McpModule } from './mcp/mcp.module';
-import { AgentService } from './langchain/agent/agent.service';
-import { ChatModule } from './chat/chat.module';
 import { PruebaService } from './prueba/prueba.service';
 import { PruebaController } from './prueba/prueba/prueba.controller';
 import { DatabaseModule } from './database/database.module';
@@ -20,8 +17,6 @@ import { DatabaseModule } from './database/database.module';
     ConfigModule.forRoot({
       isGlobal: true,
     }),
-    McpModule,
-    ChatModule,
     DatabaseModule,
   ],
   controllers: [
@@ -36,7 +31,6 @@ import { DatabaseModule } from './database/database.module';
     WhatsappService,
     EmailService,
     CalendarService,
-    AgentService,
     PruebaService,
   ],
 })

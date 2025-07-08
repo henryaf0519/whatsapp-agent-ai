@@ -4,7 +4,6 @@ import { ConfigService } from '@nestjs/config';
 import chalk from 'chalk';
 
 import { WhatsappService } from '../whatsapp/whatsapp.service';
-import { AgentService } from '../langchain/agent/agent.service'; // <--- Importa AgentService
 
 // Si ChatMessage está en `src/common/interfaces/chat-message.ts`, puedes importarla desde allí
 // Si la dejaste dentro de agent.service.ts, te sugiero moverla a un archivo compartido
@@ -39,7 +38,7 @@ export class WhatsappWebhookController {
   constructor(
     private readonly whatsappService: WhatsappService,
     private readonly configService: ConfigService,
-    private readonly agentService: AgentService,
+    //private readonly agentService: AgentService,
   ) {}
 
   private isDuplicate(id: string): boolean {
@@ -49,7 +48,7 @@ export class WhatsappWebhookController {
     return false;
   }
 
-  private async processIncomingMessage(from: string, text: string) {
+  /* private async processIncomingMessage(from: string, text: string) {
     console.log(chalk.blue(`[WhatsApp - Recibido] ${from}: ${text}`));
 
     try {
@@ -66,7 +65,7 @@ export class WhatsappWebhookController {
         'Lo siento, ha ocurrido un error y no puedo procesar tu solicitud en este momento.',
       );
     }
-  }
+  }*/
 
   @Get('webhook')
   verifyWebhook(@Req() req: Request, @Res() res: Response) {
@@ -115,7 +114,7 @@ export class WhatsappWebhookController {
           message.from &&
           !this.isDuplicate(message.id)
         ) {
-          await this.processIncomingMessage(message.from, message.text.body);
+          //await this.processIncomingMessage(message.from, message.text.body);
         } else {
           console.log(
             chalk.yellow(
