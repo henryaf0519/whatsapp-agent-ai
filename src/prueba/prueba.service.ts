@@ -13,11 +13,8 @@ import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { ConfigService } from '@nestjs/config';
 import { Pinecone } from '@pinecone-database/pinecone';
 import { CalendarService } from '../calendar/calendar.service'; // Asegúrate de que dotenv esté instalado y configurado
-import {
-  trimMessages,
-  RemoveMessage,
-  BaseMessage,
-} from '@langchain/core/messages';
+import { trimMessages, RemoveMessage } from '@langchain/core/messages';
+import { DynamoService } from '../database/dynamo/dynamo.service';
 interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
@@ -33,6 +30,7 @@ export class PruebaService implements OnModuleInit {
   constructor(
     private config: ConfigService,
     private calendarService: CalendarService,
+    private readonly dynamoService: DynamoService,
   ) {
     if (!this.config.get<string>('OPENAI_API_KEY')) {
       throw new Error('OPENAI_API_KEY no configurada');
@@ -40,8 +38,6 @@ export class PruebaService implements OnModuleInit {
   }
 
   onModuleInit() {
-    console.log('Inicializando PruebaService...');
-    // Instancia el modelo LLM
     const llm = new ChatOpenAI({
       openAIApiKey: this.config.get<string>('OPENAI_API_KEY'),
       modelName: 'gpt-4o-mini', // o el modelo que prefieras
@@ -156,83 +152,11 @@ export class PruebaService implements OnModuleInit {
     );
 
     const getAvailableSlots = tool(
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       async ({ psychologist, date }) => {
         console.log(
           `Obteniendo horarios disponibles para ${psychologist} en ${date}...`,
         );
-        const events = await this.calendarService.getEvents(date);
-        const busyIntervals = events.map((event) => {
-          // Si event.end no existe, asumimos que el evento dura 1 hora
-          const [startHour, startMinute] = event.start.split(':').map(Number);
-          let endHour: number, endMinute: number;
-          if ('end' in event && typeof event.end === 'string') {
-            [endHour, endMinute] = event.end.split(':').map(Number);
-          } else {
-            // Asume duración de 1 hora si no hay 'end'
-            endHour = startHour + 1;
-            endMinute = startMinute;
-          }
-          return {
-            startHour,
-            startMinute,
-            endHour,
-            endMinute,
-          };
-        });
-
-        const freeSlots: { start: string; end: string }[] = [];
-        // Iterar sobre cada hora de negocio (slots de 1 hora)
-        for (let h = 8; h < 17; h++) {
-          if (h === 13) continue; // Excluir la hora del almuerzo
-
-          const slotStartHour = h;
-          const slotEndHour = h + 1; // El slot de 8:00 a 9:00, termina en la hora 9.
-
-          let isFree = true;
-          for (const busy of busyIntervals) {
-            const slotStartMinutes = slotStartHour * 60;
-            const slotEndMinutes = slotEndHour * 60;
-            const busyStartMinutes = busy.startHour * 60 + busy.startMinute;
-            const busyEndMinutes = busy.endHour * 60 + busy.endMinute;
-            if (
-              slotStartMinutes < busyEndMinutes &&
-              slotEndMinutes > busyStartMinutes
-            ) {
-              isFree = false;
-              break;
-            }
-          }
-          if (isFree) {
-            freeSlots.push({
-              start: `${slotStartHour.toString().padStart(2, '0')}:00`,
-              end: `${slotEndHour.toString().padStart(2, '0')}:00`,
-            });
-          }
-        }
-        if (freeSlots.length === 0) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `Lo siento, no hay horarios disponibles para agendar el ${date} entre las 08:00 y 17:00. Por favor, ¿podrías elegir otra fecha?`,
-              },
-            ],
-          };
-        }
-        return {
-          content: [
-            {
-              type: 'text',
-              text:
-                `Estos son los horarios libres el ${date}:\n` +
-                freeSlots
-                  .map((slot) => `• ${slot.start} - ${slot.end}`)
-                  .join('\n') +
-                `\n\nPor favor, indícame qué hora te va bien.`,
-            },
-          ],
-        };
+        return this.dynamoService.obtenerHuecosDisponibles(psychologist, date);
       },
       {
         name: 'getAvailableSlots',

@@ -13,6 +13,7 @@ import { AgentService } from './langchain/agent/agent.service';
 import { ChatModule } from './chat/chat.module';
 import { PruebaService } from './prueba/prueba.service';
 import { PruebaController } from './prueba/prueba/prueba.controller';
+import { DatabaseModule } from './database/database.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { PruebaController } from './prueba/prueba/prueba.controller';
     }),
     McpModule,
     ChatModule,
+    DatabaseModule,
   ],
   controllers: [
     AppController,
