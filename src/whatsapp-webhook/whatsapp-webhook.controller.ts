@@ -5,13 +5,6 @@ import chalk from 'chalk';
 
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 
-// Si ChatMessage está en `src/common/interfaces/chat-message.ts`, puedes importarla desde allí
-// Si la dejaste dentro de agent.service.ts, te sugiero moverla a un archivo compartido
-// como src/common/interfaces/chat-message.ts para que ambos servicios puedan usarla.
-export interface ChatMessage {
-  role: 'user' | 'assistant' | 'tool'; // Agregamos 'tool' para las respuestas de herramientas
-  content: string;
-}
 
 interface WhatsAppMessagePayload {
   object: string;
