@@ -1,11 +1,8 @@
 import { Controller, Post, Get, Req, Res } from '@nestjs/common';
+import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import chalk from 'chalk';
-
-import { WhatsappService } from '../whatsapp/whatsapp.service';
-
-
 interface WhatsAppMessagePayload {
   object: string;
   entry: Array<{
@@ -40,25 +37,6 @@ export class WhatsappWebhookController {
     setTimeout(() => this.processedMessageIds.delete(id), this.DEDUPE_TTL_MS);
     return false;
   }
-
-  /* private async processIncomingMessage(from: string, text: string) {
-    console.log(chalk.blue(`[WhatsApp - Recibido] ${from}: ${text}`));
-
-    try {
-      const reply = await this.agentService.handleMessage(text, from);
-      await this.whatsappService.sendMessage(from, reply);
-      console.log(chalk.green(`[WhatsApp - Enviado] ${from}: ${reply}`));
-    } catch (error) {
-      console.error(
-        chalk.red(`[WhatsApp - Error] Fallo al procesar mensaje para ${from}:`),
-        error,
-      );
-      await this.whatsappService.sendMessage(
-        from,
-        'Lo siento, ha ocurrido un error y no puedo procesar tu solicitud en este momento.',
-      );
-    }
-  }*/
 
   @Get('webhook')
   verifyWebhook(@Req() req: Request, @Res() res: Response) {
