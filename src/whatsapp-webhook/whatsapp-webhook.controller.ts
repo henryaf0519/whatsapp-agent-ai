@@ -71,7 +71,7 @@ export class WhatsappWebhookController {
   }
 
   @Post('webhook')
-  async receiveMessage(@Req() req: Request, @Res() res: Response) {
+  receiveMessage(@Req() req: Request, @Res() res: Response) {
     try {
       const payload = req.body as WhatsAppMessagePayload;
       const entry = payload.entry?.[0];
