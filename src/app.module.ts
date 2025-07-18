@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { WhatsappController } from './whatsapp/whatsapp.controller';
 import { WhatsappService } from './whatsapp/whatsapp.service';
 import { WhatsappWebhookController } from './whatsapp-webhook/whatsapp-webhook.controller';
 import { ConfigModule } from '@nestjs/config';
@@ -21,7 +20,6 @@ import { DatabaseModule } from './database/database.module';
   ],
   controllers: [
     AppController,
-    WhatsappController,
     WhatsappWebhookController,
     EmailController,
     PruebaController,
