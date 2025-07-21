@@ -373,7 +373,7 @@ export class PruebaService implements OnModuleInit {
         ],
       },
       {
-        configurable: { thread_id: '1' },
+        configurable: { thread_id: userId },
       },
     );
     const lastContent = result.messages.at(-1)?.content;
