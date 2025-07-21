@@ -11,8 +11,6 @@ export class PruebaController {
     @Body('message') message: string,
     @Body('threadId') threadId: string,
   ) {
-    console.log('Received message:', message);
-    console.log('threadId: ', threadId);
     const reply = await this.chatbotService.conversar(threadId, message);
     return { reply: reply };
   }

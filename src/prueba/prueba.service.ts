@@ -167,7 +167,6 @@ export class PruebaService implements OnModuleInit {
 
         const resultados = (response.result?.hits || [])
           .map((hit) => {
-            console.log('hit: ', hit)
             const text = (hit.fields as { text?: string }).text ?? '';
             return `• ${text}`;
           })
