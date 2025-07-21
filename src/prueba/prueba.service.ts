@@ -151,6 +151,37 @@ export class PruebaService implements OnModuleInit {
       },
     );
 
+    const servicesAppodium = tool(
+      async (): Promise<string> => {
+        console.log('Servicios que ofrece?');
+        const response = await namespace.searchRecords({
+          query: {
+            topK: 10,
+            inputs: { text: 'Servicios ofrecidos' },
+            filter: {
+              tipo: { $in: ['servicio'] },
+            }, // Filtra
+          },
+          fields: ['text', 'tipo'],
+        });
+
+        const resultados = (response.result?.hits || [])
+          .map((hit) => {
+            console.log('hit: ', hit)
+            const text = (hit.fields as { text?: string }).text ?? '';
+            return `• ${text}`;
+          })
+          .join('\n\n');
+        return `Servicios ofrecidos:\n\n${resultados}`;
+      },
+      {
+        name: 'servicesAppodium',
+        description:
+          'Provee una descripción clara sobre los servicios que ofrece Appodium',
+        schema: z.object({}),
+      },
+    );
+
     const getAvailableSlots = tool(
       async ({ psychologist, date }) => {
         console.log(
@@ -248,6 +279,7 @@ export class PruebaService implements OnModuleInit {
 
     this.tools = [
       aboutAppodium,
+      servicesAppodium,
       listPsychologists,
       getAvailableSlots,
       createAppointment,
@@ -257,7 +289,7 @@ export class PruebaService implements OnModuleInit {
     // Función de llamada al LLM
     const llmCall = async (state: typeof MessagesAnnotation.State) => {
       const systemPrompt =
-        'Eres un asistente de Appodium. Ayuda a agendar citas con psicólogos. Saluda y pregunta si desean una cita, muestra psicólogos disponibles, pregunta fecha para obtener citas disponibles y luego pide nombre y correo para crear cita';
+        'Appodium: Asistente para citas con psicólogos. Saluda, ofrece servicios/cita. Si piden cita (o tras servicios), presenta *todos* los psicólogos disponibles, Si el producto no existe no digas que no existe. solo muestra la lista de psicologos. pregunta fecha para obtener citas disponibles y luego pide nombre y correo para crear cita';
       const systemMessage = { role: 'system', content: systemPrompt };
       const trimmedMessages = await trimMessages(state.messages, {
         maxTokens: 20,
@@ -270,7 +302,7 @@ export class PruebaService implements OnModuleInit {
         systemMessage,
         ...trimmedMessages,
       ]);
-      this.calcular(result.response_metadata.usage.total_tokens);
+      this.calcular(result.response_metadata.tokenUsage.totalTokens);
       if (result.tool_calls && result.tool_calls.length > 0) {
         console.log(
           "LLM ha solicitado herramientas. El grafo continuará con 'tools'.",
@@ -284,12 +316,10 @@ export class PruebaService implements OnModuleInit {
           ...trimmedMessages, // Pasa solo los mensajes relevantes para el resumen
           { role: 'user', content: summaryPrompt }, // El prompt de resumen como un mensaje de usuario
         ]);
-
         const deleteMessages = trimmedMessages
           .filter((m) => typeof m.id === 'string')
           .map((m) => new RemoveMessage({ id: m.id as string }));
-
-        this.calcular(summaryMessage.usage_metadata?.total_tokens);
+        this.calcular(summaryMessage.response_metadata?.tokenUsage.totalTokens);
         return {
           messages: [summaryMessage, result, ...deleteMessages],
         };
@@ -327,7 +357,6 @@ export class PruebaService implements OnModuleInit {
 
   // Método público para usar el agente
   calcular(total_tokens: any) {
-    console.log('Calculando tokens utilizados...: ', total_tokens);
     this.tokenCounter = this.tokenCounter + total_tokens || 0;
     console.log('Tokens utilizados:', this.tokenCounter);
   }

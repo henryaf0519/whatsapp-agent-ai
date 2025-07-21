@@ -14,17 +14,6 @@ module.exports = function (options, webpack) {
       }),
     ],
     plugins: [
-      // ① Copiamos promptVentas.json desde src/mcp a dist/mcp
-      new CopyWebpackPlugin({
-        patterns: [
-          {
-            from: path.resolve(__dirname, 'src', 'mcp', 'promptVentas.json'),
-            // 'to' relativo al output.path (por defecto dist/)
-            to: 'mcp/promptVentas.json',
-          },
-        ],
-      }),
-
       ...options.plugins,
       new webpack.HotModuleReplacementPlugin(),
       new webpack.WatchIgnorePlugin({

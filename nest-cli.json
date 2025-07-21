@@ -3,11 +3,6 @@
   "collection": "@nestjs/schematics",
   "sourceRoot": "src",
   "compilerOptions": {
-    "deleteOutDir": true,
-    "assets": [{
-      "include": "src/mcp/mcp/promptVentas.json",
-      "outDir": "dist/mcp/mcp"
-
-    }]
+    "deleteOutDir": true
   }
 }
