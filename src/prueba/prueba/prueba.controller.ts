@@ -4,14 +4,23 @@ import { PruebaService } from '../prueba.service';
 
 @Controller('prueba')
 export class PruebaController {
-  constructor(private readonly chatbotService: PruebaService) {}
+  constructor(
+    private readonly chatbotService: PruebaService,
+    private readonly pruebaService: PruebaService,
+  ) {}
 
-  @Post()
+  @Post('chat')
   async handleMessage(
     @Body('message') message: string,
     @Body('threadId') threadId: string,
   ) {
     const reply = await this.chatbotService.conversar(threadId, message);
     return { reply: reply };
+  }
+
+  @Post('end')
+  async endConversation(@Body('threadId') threadId: string) {
+    await this.pruebaService.finalizeConversation(threadId);
+    return { success: true, message: `Conversation ${threadId} finalized.` };
   }
 }

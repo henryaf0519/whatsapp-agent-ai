@@ -15,9 +15,13 @@ import { Pinecone } from '@pinecone-database/pinecone';
 import { CalendarService } from '../calendar/calendar.service'; // Asegúrate de que dotenv esté instalado y configurado
 import { trimMessages, RemoveMessage } from '@langchain/core/messages';
 import { DynamoService } from '../database/dynamo/dynamo.service';
+import { S3ConversationLogService } from 'src/conversation-log/s3-conversation-log.service';
+import { Cron } from '@nestjs/schedule';
 interface Message {
+  threadId: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
+  timestamp: string;
 }
 @Injectable()
 export class PruebaService implements OnModuleInit {
@@ -31,6 +35,7 @@ export class PruebaService implements OnModuleInit {
     private config: ConfigService,
     private calendarService: CalendarService,
     private readonly dynamoService: DynamoService,
+    private readonly logService: S3ConversationLogService,
   ) {
     if (!this.config.get<string>('OPENAI_API_KEY')) {
       throw new Error('OPENAI_API_KEY no configurada');
@@ -361,7 +366,16 @@ export class PruebaService implements OnModuleInit {
   }
 
   async conversar(userId: string, mensaje: string) {
-    // Ejecuta el agente con todo el historial relevante
+    if (!this.userHistories[userId]) {
+      this.userHistories[userId] = [];
+    }
+    this.userHistories[userId].push({
+      threadId: userId,
+      role: 'user',
+      content: mensaje,
+      timestamp: new Date().toISOString(),
+    });
+
     const result = await this.agentBuilder.invoke(
       {
         messages: [
@@ -375,9 +389,48 @@ export class PruebaService implements OnModuleInit {
         configurable: { thread_id: userId },
       },
     );
+    this.userHistories[userId].push({
+      threadId: userId,
+      role: 'assistant',
+      content: result.messages.at(-1)?.content,
+      timestamp: new Date().toISOString(),
+    });
+
     const lastContent = result.messages.at(-1)?.content;
     return typeof lastContent === 'string'
       ? lastContent
       : 'No response from agent';
+  }
+
+  async finalizeConversation(threadId: string) {
+    const history = this.userHistories[threadId];
+
+    if (!history || history.length === 0) return;
+
+    // Convertir Message[] a ConversationRecord[] agregando el threadId
+    const conversation: Message[] = history.map((message) => ({
+      threadId, // Agrega el threadId
+      role: message.role, // Aquí ya puedes tener 'system', 'user' o 'assistant'
+      content: message.content,
+      timestamp: message.timestamp,
+    }));
+
+    await this.logService.saveConversation(threadId, conversation);
+    delete this.userHistories[threadId]; // Limpiar historial
+    console.log(`Conversation ${threadId} finalized and saved to S3.`);
+  }
+
+  @Cron('*/10 * * * *')
+  async handleCleanupCron() {
+    const now = Date.now();
+    const tenMin = 10 * 60 * 1000;
+    for (const [threadId, history] of Object.entries(this.userHistories)) {
+      const lastMsg = history[history.length - 1];
+      const lastTs = new Date(lastMsg.timestamp).getTime();
+      if (now - lastTs > tenMin) {
+        console.log(`Thread ${threadId} inactive for >10min, finalizing…`);
+        await this.finalizeConversation(threadId);
+      }
+    }
   }
 }

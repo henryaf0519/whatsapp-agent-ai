@@ -10,13 +10,17 @@ import { EmailController } from './email/email.controller';
 import { PruebaService } from './prueba/prueba.service';
 import { PruebaController } from './prueba/prueba/prueba.controller';
 import { DatabaseModule } from './database/database.module';
+import { ConversationLogModule } from './conversation-log/conversation-log.module';
+import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    ScheduleModule.forRoot(),
     DatabaseModule,
+    ConversationLogModule,
   ],
   controllers: [
     AppController,
