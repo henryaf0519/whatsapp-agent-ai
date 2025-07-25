@@ -42,7 +42,6 @@ export class DynamoService {
       new PutCommand({ TableName: 'AgentSchedule', Item: item }),
     );
     return item;
-    // Aquí pones la lógica para crear un ítem en DynamoDB
   }
 
   async obtenerPsicologoPorNombre(nombre) {
@@ -70,29 +69,23 @@ export class DynamoService {
   ) {
     const slots = [] as string[];
 
-    // Inicia el día en la fecha proporcionada y establece la hora de inicio
     let current = moment
       .tz(fecha, 'America/Bogota')
       .startOf('day')
       .add(startHour, 'hours');
 
-    // Establece la hora de fin (fin del día o hora final proporcionada)
     const end = moment(current)
       .clone()
       .add(endHour - startHour, 'hours');
 
-    // Generar los slots entre la hora de inicio y la hora final
     while (current.isBefore(end)) {
       const hour = current.hour();
 
-      // Si la hora no está en el rango de descanso, agrega el slot
       if (hour < breakStart || hour >= breakEnd) {
-        // Formateamos la fecha en el formato 'YYYY-MM-DDTHH:mm:ss.SSS' y agregamos la 'Z'
-        const formattedDate = current.format('YYYY-MM-DDTHH:mm:ss.SSS') + 'Z'; // Mantiene la hora local y agrega la Z
+        const formattedDate = current.format('YYYY-MM-DDTHH:mm:ss.SSS') + 'Z';
         slots.push(formattedDate);
       }
 
-      // Agregar la duración del slot (en minutos) a la hora actual
       current = current.add(slotDuration, 'minutes');
     }
     return slots;
@@ -165,7 +158,7 @@ export class DynamoService {
     );
     const ocupadas = await this.obtenerCitasOcupadas(psicologo.id, fecha);
     return (await slots)
-      .filter((slot) => !ocupadas.has(slot)) // Filtra los slots que no están ocupados
+      .filter((slot) => !ocupadas.has(slot))
       .map((slot) => {
         const date = new Date(slot);
         const startTime = `${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}`;

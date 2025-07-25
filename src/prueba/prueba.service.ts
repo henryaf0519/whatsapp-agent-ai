@@ -12,7 +12,7 @@ import {
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { ConfigService } from '@nestjs/config';
 import { Pinecone } from '@pinecone-database/pinecone';
-import { CalendarService } from '../calendar/calendar.service'; // Asegúrate de que dotenv esté instalado y configurado
+import { CalendarService } from '../calendar/calendar.service';
 import { trimMessages, RemoveMessage } from '@langchain/core/messages';
 import { DynamoService } from '../database/dynamo/dynamo.service';
 import { S3ConversationLogService } from 'src/conversation-log/s3-conversation-log.service';
@@ -45,11 +45,11 @@ export class PruebaService implements OnModuleInit {
   onModuleInit() {
     const llm = new ChatOpenAI({
       openAIApiKey: this.config.get<string>('OPENAI_API_KEY'),
-      modelName: 'gpt-4o-mini', // o el modelo que prefieras
+      modelName: 'gpt-4o-mini',
     });
     const llmSumarize = new ChatOpenAI({
       openAIApiKey: this.config.get<string>('OPENAI_API_KEY'),
-      modelName: 'gpt-3.5-turbo', // o el modelo que prefieras
+      modelName: 'gpt-3.5-turbo',
     });
     const pineconeApiKey = this.config.get<string>('PINECONE_API_KEY');
     const pineconeIndex = this.config.get<string>('PINECONE_INDEX');
@@ -79,16 +79,14 @@ export class PruebaService implements OnModuleInit {
             inputs: { text: 'Psicologos' },
             filter: {
               tipo: { $in: ['psicologo'] },
-            }, // Filtra
+            },
           },
           fields: ['text', 'tipo'],
         });
 
         const resultados = (response.result?.hits || [])
           .map((hit) => {
-            // Asegura que hit.fields tiene la propiedad text de tipo string
             const text = (hit.fields as { text?: string }).text ?? '';
-            // Ejemplo de campo: "Nombre | Especialidad. Descripción... Precio: $XX.XXX COP"
             const match = text.match(
               /^(.*?)\|([^.]*)\.\s*(.*?)Precio:\s*([$\d.,\sA-Za-z]+)/i,
             );
@@ -98,7 +96,6 @@ export class PruebaService implements OnModuleInit {
               const precio = match[4].trim();
               return `• ${nombre} | ${especialidad} | Precio: ${precio}`;
             }
-            // Si no hay match, retorna todo el texto
             return `• ${text}`;
           })
           .join('\n\n');
@@ -122,16 +119,14 @@ export class PruebaService implements OnModuleInit {
             inputs: { text: 'Que es Appodium?' },
             filter: {
               tipo: { $in: ['descripcion'] },
-            }, // Filtra
+            },
           },
           fields: ['text', 'tipo'],
         });
 
         const resultados = (response.result?.hits || [])
           .map((hit) => {
-            // Asegura que hit.fields tiene la propiedad text de tipo string
             const text = (hit.fields as { text?: string }).text ?? '';
-            // Ejemplo de campo: "Nombre | Especialidad. Descripción... Precio: $XX.XXX COP"
             const match = text.match(
               /^(.*?)\|([^.]*)\.\s*(.*?)Precio:\s*([$\d.,\sA-Za-z]+)/i,
             );
@@ -141,7 +136,6 @@ export class PruebaService implements OnModuleInit {
               const precio = match[4].trim();
               return `• ${nombre} | ${especialidad} | Precio: ${precio}`;
             }
-            // Si no hay match, retorna todo el texto
             return `• ${text}`;
           })
           .join('\n\n');
@@ -165,7 +159,7 @@ export class PruebaService implements OnModuleInit {
             inputs: { text: 'Servicios ofrecidos' },
             filter: {
               tipo: { $in: ['servicio'] },
-            }, // Filtra
+            },
           },
           fields: ['text', 'tipo'],
         });
@@ -290,7 +284,6 @@ export class PruebaService implements OnModuleInit {
     ];
     this.llmWithTools = llm.bindTools(this.tools);
 
-    // Función de llamada al LLM
     const llmCall = async (state: typeof MessagesAnnotation.State) => {
       const systemPrompt =
         'Appodium: Asistente para citas con psicólogos. Saluda, ofrece servicios/cita. Si piden cita (o tras servicios), presenta *todos* los psicólogos disponibles, Si el producto no existe no digas que no existe. solo muestra la lista de psicologos. pregunta fecha para obtener citas disponibles y luego pide nombre y correo para crear cita';
@@ -317,8 +310,8 @@ export class PruebaService implements OnModuleInit {
         const summaryPrompt =
           'Resume la siguiente conversación extrayendo los datos de la cita agendada (Nombre, Email, Profesional, Fecha, Hora, Precio) en una lista.';
         const summaryMessage = await llmSumarize.invoke([
-          ...trimmedMessages, // Pasa solo los mensajes relevantes para el resumen
-          { role: 'user', content: summaryPrompt }, // El prompt de resumen como un mensaje de usuario
+          ...trimmedMessages,
+          { role: 'user', content: summaryPrompt },
         ]);
         const deleteMessages = trimmedMessages
           .filter((m) => typeof m.id === 'string')
@@ -329,14 +322,10 @@ export class PruebaService implements OnModuleInit {
         };
       }
 
-      // --- Paso final: Retornar la respuesta directa del LLM si no hubo tool_calls ni resumen ---
-      // Si no se cumplen las condiciones para una llamada a herramienta o para resumir,
-      // simplemente devolvemos la respuesta directa del LLM.
       return { messages: [result] };
     };
     const toolNode = new ToolNode(this.tools);
 
-    // Función condicional para decidir el flujo
     function shouldContinue(state) {
       const messages = state.messages;
       const lastMessage = messages.at(-1);
@@ -346,7 +335,6 @@ export class PruebaService implements OnModuleInit {
       return '__end__';
     }
 
-    // Construye el grafo del agente
     this.agentBuilder = new StateGraph(MessagesAnnotation)
       .addNode('llmCall', llmCall)
       .addNode('tools', toolNode)
@@ -359,7 +347,6 @@ export class PruebaService implements OnModuleInit {
       .compile({ checkpointer: new MemorySaver() });
   }
 
-  // Método público para usar el agente
   calcular(total_tokens: any) {
     this.tokenCounter = this.tokenCounter + total_tokens || 0;
     console.log('Tokens utilizados:', this.tokenCounter);
@@ -407,16 +394,15 @@ export class PruebaService implements OnModuleInit {
 
     if (!history || history.length === 0) return;
 
-    // Convertir Message[] a ConversationRecord[] agregando el threadId
     const conversation: Message[] = history.map((message) => ({
-      threadId, // Agrega el threadId
-      role: message.role, // Aquí ya puedes tener 'system', 'user' o 'assistant'
+      threadId,
+      role: message.role,
       content: message.content,
       timestamp: message.timestamp,
     }));
 
     await this.logService.saveConversation(threadId, conversation);
-    delete this.userHistories[threadId]; // Limpiar historial
+    delete this.userHistories[threadId];
     console.log(`Conversation ${threadId} finalized and saved to S3.`);
   }
 
