@@ -6,7 +6,6 @@ import {
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import { OAuth2Client } from 'google-auth-library';
-
 @Injectable()
 export class CalendarService {
   private readonly calendarId: string;
@@ -59,8 +58,6 @@ export class CalendarService {
     }
 
     const url = `${this.baseUrl}/calendars/${this.calendarId}/events?sendUpdates=all`;
-    this.logger.log(`POST ${url} — start=${body.start.dateTime}`);
-
     try {
       const { data } = await axios.post(url, body, {
         headers: {
@@ -85,4 +82,5 @@ export class CalendarService {
       throw new InternalServerErrorException('Error inesperado creando evento');
     }
   }
+
 }
