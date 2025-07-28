@@ -1,6 +1,6 @@
 import { Controller } from '@nestjs/common';
 import { Post, Body } from '@nestjs/common';
-import { PruebaService } from '../prueba.service';
+import { PruebaService } from '../agent.service';
 
 @Controller('prueba')
 export class PruebaController {
