@@ -3,7 +3,7 @@ import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import chalk from 'chalk';
-import { PruebaService } from 'src/prueba/prueba.service';
+import { PruebaService } from 'src/agent/agent.service';
 interface WhatsAppMessagePayload {
   object: string;
   entry: Array<{
