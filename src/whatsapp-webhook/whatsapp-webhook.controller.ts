@@ -3,6 +3,7 @@ import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import chalk from 'chalk';
+import { PruebaService } from 'src/prueba/prueba.service';
 interface WhatsAppMessagePayload {
   object: string;
   entry: Array<{
@@ -27,6 +28,7 @@ export class WhatsappWebhookController {
 
   constructor(
     private readonly whatsappService: WhatsappService,
+    private readonly chatbotService: PruebaService,
     private readonly configService: ConfigService,
     //private readonly agentService: AgentService,
   ) {}
@@ -71,7 +73,7 @@ export class WhatsappWebhookController {
   }
 
   @Post('webhook')
-  receiveMessage(@Req() req: Request, @Res() res: Response) {
+  async receiveMessage(@Req() req: Request, @Res() res: Response) {
     try {
       const payload = req.body as WhatsAppMessagePayload;
       const entry = payload.entry?.[0];
@@ -85,7 +87,13 @@ export class WhatsappWebhookController {
           message.from &&
           !this.isDuplicate(message.id)
         ) {
-          //await this.processIncomingMessage(message.from, message.text.body);
+          console.log('mensaje;', message);
+          const reply = await this.chatbotService.conversar(
+            '12345',
+            message.text.body,
+          );
+          console.log(reply);
+          await this.whatsappService.sendMessage(message.from, reply);
         } else {
           console.log(
             chalk.yellow(
