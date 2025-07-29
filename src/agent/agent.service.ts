@@ -77,7 +77,6 @@ export class PruebaService implements OnModuleInit {
       this.initializePinecone();
       this.initializeTools();
       this.buildAgent();
-      this.logger.log('Agent service initialized successfully');
     } catch (error) {
       this.logger.error('Failed to initialize agent service', error);
       throw error;
@@ -456,8 +455,6 @@ export class PruebaService implements OnModuleInit {
         form,
         createUser,
       ];
-
-      this.logger.log('Tools initialized successfully');
     } catch (error) {
       this.logger.error('Failed to initialize tools', error);
       throw new Error('Error al inicializar herramientas');
@@ -542,8 +539,6 @@ export class PruebaService implements OnModuleInit {
         })
         .addEdge('tools', 'llmCall')
         .compile({ checkpointer: new MemorySaver() });
-
-      this.logger.log('Agent graph built successfully');
     } catch (error) {
       this.logger.error('Failed to build agent', error);
       throw new Error('Error al construir el agente');
