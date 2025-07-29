@@ -230,6 +230,43 @@ export class DynamoService {
     }
   }
 
+  async createUser(
+    name,
+    doc,
+    ips,
+    date,
+    eps,
+    pension,
+    box,
+    risk,
+    phone,
+    address,
+  ) {
+    const item = {
+      id: uuidv4(),
+      name,
+      doc,
+      ips,
+      date,
+      eps,
+      pension,
+      box,
+      risk,
+      phone,
+      address,
+      createdAt: new Date().toISOString(),
+    };
+    try {
+      await this.docClient.send(
+        new PutCommand({ TableName: 'users_afiliamos', Item: item }),
+      );
+      return { success: true, message: 'usuario creado con exito', item };
+    } catch (error) {
+      console.error('Error al crear registro:', error);
+      return { success: false, message: 'Error al crear registro' };
+    }
+  }
+
   async crearCita(date, hour, name, email) {
     const psicologo = await this.obtenerPsicologoPorNombre(
       normalizeString(name),
@@ -258,6 +295,42 @@ export class DynamoService {
       success: true,
       message: 'Cita creada con éxito',
       psicologo: psicologo.email,
+    };
+  }
+
+  async crearUsuario(
+    name,
+    doc,
+    ips,
+    date,
+    eps,
+    pension,
+    box,
+    risk,
+    phone,
+    address,
+  ) {
+    const resp = await this.createUser(
+      name,
+      doc,
+      ips,
+      date,
+      eps,
+      pension,
+      box,
+      risk,
+      phone,
+      address,
+    );
+    if (!resp.success) {
+      return {
+        success: false,
+        message: resp.message || 'Error al crear la cita',
+      };
+    }
+    return {
+      success: true,
+      message: 'Cita creada con éxito',
     };
   }
 }

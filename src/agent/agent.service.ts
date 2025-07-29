@@ -168,6 +168,68 @@ export class PruebaService implements OnModuleInit {
       },
     );
 
+    const createUser = tool(
+      async ({
+        name,
+        doc,
+        ips,
+        date,
+        eps,
+        pension,
+        box,
+        risk,
+        phone,
+        address,
+      }) => {
+        console.log(
+          `Creando usuario: ${name}, Doc: ${doc}, IPS: ${ips}, Fecha: ${date}, EPS: ${eps}, Pension: ${pension}, Caja: ${box}, Riesgo: ${risk}, Teléfono: ${phone}, Dirección: ${address}`,
+        );
+        try {
+          const result = await this.dynamoService.crearUsuario(
+            name,
+            doc,
+            ips,
+            date,
+            eps,
+            pension,
+            box,
+            risk,
+            phone,
+            address,
+          );
+          if (!result.success) {
+            throw new Error(result.message);
+          }
+          return `✅ Usuario creado con éxito`;
+        } catch (error: unknown) {
+          if (error instanceof Error) {
+            console.error('Error al crear usuario:', error.message);
+            return `❌ Error al crear usuario: ${error.message}`;
+          } else {
+            console.error('Error al crear usuario');
+            return `❌ Error al crear usuario: Ocurrió un error inesperado`;
+          }
+        }
+      },
+      {
+        name: 'createUser',
+        description:
+          'Crea un usuario en la bae de datos con los datos proporcionados',
+        schema: z.object({
+          name: z.string(),
+          doc: z.string(),
+          ips: z.string(),
+          date: z.string(),
+          eps: z.string(),
+          pension: z.string(),
+          box: z.string(),
+          risk: z.string(),
+          phone: z.string(),
+          address: z.string(),
+        }),
+      },
+    );
+
     /*  const getAvailableSlots = tool(
       async ({ psychologist, date }) => {
         console.log(
@@ -269,6 +331,7 @@ export class PruebaService implements OnModuleInit {
       prices,
       risks,
       form,
+      createUser,
       //getAvailableSlots,
       //createAppointment,
     ];
@@ -277,7 +340,7 @@ export class PruebaService implements OnModuleInit {
     const llmCall = async (state: typeof MessagesAnnotation.State) => {
       // Optimized shorter system prompt
       const systemPrompt =
-        'Asistente Servicios: Saluda la empresa se llama afiliamos, pregunta sobre los servicios;  ofrece todos los servicios; si piden uno específico, muestra todos los precios; si el nivel es desconocido, usa la herramienta de riesgos; al elegir producto, abre el formulario para valores.';
+        'Asistente Servicios: Saluda la empresa se llama afiliamos, pregunta sobre los servicios;  ofrece todos los servicios; si piden uno específico, muestra todos los precios; si el nivel es desconocido, usa la herramienta de riesgos; al elegir producto, abre el formulario para valores; cuando los datos sean obtenidos decir en un momento un asesor se contactara contigo para generar el pago';
       const systemMessage = { role: 'system', content: systemPrompt };
 
       // Improved token counting and trimming
