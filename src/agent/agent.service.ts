@@ -43,11 +43,10 @@ export class PruebaService implements OnModuleInit {
   }
 
   onModuleInit() {
-    // Use only one LLM instance to reduce overhead
     const llm = new ChatOpenAI({
       openAIApiKey: this.config.get<string>('OPENAI_API_KEY'),
-      modelName: 'gpt-4o-mini', // More cost-effective than using two models
-      temperature: 0.1, // Lower temperature for more consistent responses
+      modelName: 'gpt-4o-mini',
+      temperature: 0.1,
     });
     const pineconeApiKey = this.config.get<string>('PINECONE_API_KEY');
     const pineconeIndex = this.config.get<string>('PINECONE_INDEX');
@@ -81,7 +80,7 @@ export class PruebaService implements OnModuleInit {
       return response.result?.hits || [];
     };
 
-    const formatPsychologistText = (text: string) => {
+    const format = (text: string) => {
       const match = text.match(
         /^(.*?)\|([^.]*)\.\s*(.*?)Precio:\s*([$\d.,\sA-Za-z]+)/i,
       );
@@ -92,57 +91,84 @@ export class PruebaService implements OnModuleInit {
       return `• ${text}`;
     };
 
-    const listPsychologists = tool(
+    const prices = tool(
       async (): Promise<string> => {
-        const hits = await searchPinecone('Psicologos', ['psicologo']);
+        const hits = await searchPinecone('prices', ['prices']);
+        console.log('Hits de precios:', hits);
         const resultados = hits
-          .map((hit) =>
-            formatPsychologistText(
-              (hit.fields as { text?: string }).text ?? '',
-            ),
-          )
+          .map((hit) => format((hit.fields as { text?: string }).text ?? ''))
           .join('\n');
-        return `Psicólogos disponibles:\n${resultados}`;
+        console.log('Resultados de precios:', resultados);
+        return `Servicios disponibles:\n${resultados}`;
       },
       {
-        name: 'listPsychologists',
-        description: 'Lista psicólogos disponibles con especialidad y precio.',
+        name: 'listPrices',
+        description: 'Lista precios por productos',
         schema: z.object({}),
       },
     );
 
-    const aboutAppodium = tool(
+    const about = tool(
       async (): Promise<string> => {
-        const hits = await searchPinecone('Que es Appodium?', ['descripcion']);
+        const hits = await searchPinecone('Que es afiliamos?', ['descripcion']);
         const resultados = hits
           .map((hit) => `• ${(hit.fields as { text?: string }).text ?? ''}`)
           .join('\n');
-        return `Sobre Appodium:\n${resultados}`;
+        return `Sobre Afiliamos:\n${resultados}`;
       },
       {
-        name: 'aboutAppodium',
-        description:
-          'Información sobre Appodium: misión, visión y funcionamiento.',
+        name: 'aboutAfiliamos',
+        description: 'Información sobre Afilismos',
         schema: z.object({}),
       },
     );
 
-    const servicesAppodium = tool(
+    const services = tool(
       async (): Promise<string> => {
-        const hits = await searchPinecone('Servicios ofrecidos', ['servicio']);
+        const hits = await searchPinecone('servicios', ['servicios']);
         const resultados = hits
           .map((hit) => `• ${(hit.fields as { text?: string }).text ?? ''}`)
           .join('\n');
         return `Servicios:\n${resultados}`;
       },
       {
-        name: 'servicesAppodium',
-        description: 'Servicios que ofrece Appodium.',
+        name: 'servicesAfiliamos',
+        description: 'Servicios que ofrece Afiliamos.',
         schema: z.object({}),
       },
     );
 
-    const getAvailableSlots = tool(
+    const risks = tool(
+      async (): Promise<string> => {
+        const hits = await searchPinecone('Riesgos ARL', ['risk']);
+        const resultados = hits
+          .map((hit) => `• ${(hit.fields as { text?: string }).text ?? ''}`)
+          .join('\n');
+        return `Sobre Riesgos:\n${resultados}`;
+      },
+      {
+        name: 'risks',
+        description: 'Informacion sobre Riesgos ARL',
+        schema: z.object({}),
+      },
+    );
+
+    const form = tool(
+      (): Promise<string> => {
+        const hits = [
+          'NOMBRE COMPLETO:\nCEDULA:\nCIUDAD IPS:\nFECHA INGRESO:\nEPS:\nPENSION:\nCAJA:\nNIVEL DE RIESGO:\nCELULAR:\nDIRECCION:',
+        ];
+        const resultados = hits.map((hit) => `• ${hit}`).join('\n');
+        return Promise.resolve(`Formulario:\n${resultados}`);
+      },
+      {
+        name: 'form',
+        description: 'Formulario para crear la afiliacion',
+        schema: z.object({}),
+      },
+    );
+
+    /*  const getAvailableSlots = tool(
       async ({ psychologist, date }) => {
         console.log(
           `Obteniendo horarios disponibles para ${psychologist} en ${date}...`,
@@ -235,21 +261,23 @@ export class PruebaService implements OnModuleInit {
           email: z.string().email(),
         }),
       },
-    );
+    );*/
 
     this.tools = [
-      aboutAppodium,
-      servicesAppodium,
-      listPsychologists,
-      getAvailableSlots,
-      createAppointment,
+      about,
+      services,
+      prices,
+      risks,
+      form,
+      //getAvailableSlots,
+      //createAppointment,
     ];
     this.llmWithTools = llm.bindTools(this.tools);
 
     const llmCall = async (state: typeof MessagesAnnotation.State) => {
       // Optimized shorter system prompt
       const systemPrompt =
-        'Appodium: Asistente para citas. Saluda, ofrece servicios/cita. Si piden cita (o tras servicios), presenta *todos* los psicólogos disponibles, Si no existe no digas que no existe. solo muestra la lista de psicologos. pregunta fecha para citas disponibles y luego pide nombre, telefono y correo para crear cita';
+        'Asistente Servicios: Saluda la empresa se llama afiliamos, pregunta sobre los servicios;  ofrece todos los servicios; si piden uno específico, muestra todos los precios; si el nivel es desconocido, usa la herramienta de riesgos; al elegir producto, abre el formulario para valores.';
       const systemMessage = { role: 'system', content: systemPrompt };
 
       // Improved token counting and trimming
@@ -283,11 +311,12 @@ export class PruebaService implements OnModuleInit {
       // More efficient summarization - only when really needed
       if (trimmedMessages.length >= 10) {
         const summaryPrompt =
-          'Resume: datos cita (Nombre, Email, Profesional, Fecha, Hora)';
+          'Tu resumes conversaciones: extrae datos importantes como precios de servicios, nivel escogido, datos del formulario';
         const summaryMessage = await llm.invoke([
           ...trimmedMessages.slice(-4), // Only last 4 messages for context
           { role: 'user', content: summaryPrompt },
         ]);
+        console.log('Summarization result:', summaryMessage.content);
         const deleteMessages = trimmedMessages
           .slice(0, -2) // Keep last 2 messages
           .filter((m) => typeof m.id === 'string')
@@ -350,7 +379,6 @@ export class PruebaService implements OnModuleInit {
       content: mensaje,
       timestamp,
     });
-
     const result = await this.agentBuilder.invoke(
       {
         messages: [{ role: 'user', content: mensaje }],
