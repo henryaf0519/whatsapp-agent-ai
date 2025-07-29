@@ -91,18 +91,35 @@ export class PruebaService implements OnModuleInit {
       return `• ${text}`;
     };
 
-    const prices = tool(
+    const membershipPrices = tool(
       async (): Promise<string> => {
-        const hits = await searchPinecone('prices', ['prices']);
+        const hits = await searchPinecone('membershipPrices', [
+          'membershipPrices',
+        ]);
         const resultados = hits
           .map((hit) => format((hit.fields as { text?: string }).text ?? ''))
           .join('\n');
         return `Servicios disponibles:\n${resultados}`;
       },
       {
-        name: 'listPrices',
+        name: 'membershipPrices',
         description:
-          'Lista precios por productos, solo se ofrecen estos servicios. Si no existen se dice que no se tiene el servicio',
+          'Lista precios de las afiliaciones, solo se ofrecen estas afiliaciones. Si no existen se dice que no se tiene el servicio',
+        schema: z.object({}),
+      },
+    );
+    const policyPrices = tool(
+      async (): Promise<string> => {
+        const hits = await searchPinecone('policyPrices', ['policyPrices']);
+        const resultados = hits
+          .map((hit) => format((hit.fields as { text?: string }).text ?? ''))
+          .join('\n');
+        return `Servicios disponibles:\n${resultados}`;
+      },
+      {
+        name: 'policyPrices',
+        description:
+          'Lista precios de las polizas, solo se ofrecen estas polizas. Si no existen se dice que no se tiene el servicio',
         schema: z.object({}),
       },
     );
@@ -155,7 +172,7 @@ export class PruebaService implements OnModuleInit {
     const form = tool(
       (): Promise<string> => {
         const hits = [
-          'NOMBRE COMPLETO:\nCEDULA:\nCIUDAD IPS:\nFECHA INGRESO:\nEPS:\nPENSION:\nCAJA:\nNIVEL DE RIESGO:\nCELULAR:\nDIRECCION:',
+          'NOMBRE COMPLETO:\nCEDULA:\nCIUDAD IPS:\nFECHA INGRESO:\nEPS:\nPENSION:\nCAJA:\nNIVEL DE RIESGO O POLIZA:\nCELULAR:\nDIRECCION:',
         ];
         const resultados = hits.map((hit) => `• ${hit}`).join('\n');
         return Promise.resolve(`Formulario:\n${resultados}`);
@@ -180,6 +197,7 @@ export class PruebaService implements OnModuleInit {
         risk,
         phone,
         address,
+        service,
       }) => {
         console.log(
           `Creando usuario: ${name}, Doc: ${doc}, IPS: ${ips}, Fecha: ${date}, EPS: ${eps}, Pension: ${pension}, Caja: ${box}, Riesgo: ${risk}, Teléfono: ${phone}, Dirección: ${address}`,
@@ -196,6 +214,7 @@ export class PruebaService implements OnModuleInit {
             risk,
             phone,
             address,
+            service,
           );
           if (!result.success) {
             throw new Error(result.message);
@@ -214,7 +233,7 @@ export class PruebaService implements OnModuleInit {
       {
         name: 'createUser',
         description:
-          'Crea un usuario en la bae de datos con los datos proporcionados',
+          'Crea un usuario en la base de datos con los datos proporcionados, con servicio y precio',
         schema: z.object({
           name: z.string(),
           doc: z.string(),
@@ -226,6 +245,7 @@ export class PruebaService implements OnModuleInit {
           risk: z.string(),
           phone: z.string(),
           address: z.string(),
+          service: z.string(),
         }),
       },
     );
@@ -328,7 +348,8 @@ export class PruebaService implements OnModuleInit {
     this.tools = [
       about,
       services,
-      prices,
+      membershipPrices,
+      policyPrices,
       risks,
       form,
       createUser,
@@ -340,7 +361,7 @@ export class PruebaService implements OnModuleInit {
     const llmCall = async (state: typeof MessagesAnnotation.State) => {
       // Optimized shorter system prompt
       const systemPrompt =
-        'Asistente Servicios: Saluda la empresa se llama afiliamos, pregunta sobre los servicios;  ofrece todos los servicios; si piden uno específico, muestra todos los precios; al elegir producto,si ya se sabe el producto a comprar envia el formulario; cuando los datos sean obtenidos decir en un momento un asesor se contactara contigo para generar el pago';
+        'Asistente Servicios: Saluda la empresa se llama afiliamos, pregunta sobre los servicios;  ofrece todos los servicios; si piden uno específico, muestra todos los precios; se debe elegir un producto para continuar,si ya se sabe el producto a comprar envia el formulario; cuando los datos sean obtenidos decir en un momento un asesor se contactara contigo para generar el pago';
       const systemMessage = { role: 'system', content: systemPrompt };
 
       // Improved token counting and trimming
@@ -374,7 +395,7 @@ export class PruebaService implements OnModuleInit {
       // More efficient summarization - only when really needed
       if (trimmedMessages.length >= 10) {
         const summaryPrompt =
-          'Tu resumes conversaciones: extrae datos importantes como precios de servicios, nivel escogido, datos del formulario';
+          'Tu resumes conversaciones: extrae datos importantes como precios de servicios, nivel escogido, servicio escogido, datos del formulario';
         const summaryMessage = await llm.invoke([
           ...trimmedMessages.slice(-4), // Only last 4 messages for context
           { role: 'user', content: summaryPrompt },

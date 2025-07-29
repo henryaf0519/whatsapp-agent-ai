@@ -241,6 +241,7 @@ export class DynamoService {
     risk,
     phone,
     address,
+    service,
   ) {
     const item = {
       id: uuidv4(),
@@ -255,6 +256,7 @@ export class DynamoService {
       phone,
       address,
       createdAt: new Date().toISOString(),
+      service,
     };
     try {
       await this.docClient.send(
@@ -309,6 +311,7 @@ export class DynamoService {
     risk,
     phone,
     address,
+    service,
   ) {
     const resp = await this.createUser(
       name,
@@ -321,6 +324,7 @@ export class DynamoService {
       risk,
       phone,
       address,
+      service,
     );
     if (!resp.success) {
       return {
