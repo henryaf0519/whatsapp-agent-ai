@@ -94,16 +94,15 @@ export class PruebaService implements OnModuleInit {
     const prices = tool(
       async (): Promise<string> => {
         const hits = await searchPinecone('prices', ['prices']);
-        console.log('Hits de precios:', hits);
         const resultados = hits
           .map((hit) => format((hit.fields as { text?: string }).text ?? ''))
           .join('\n');
-        console.log('Resultados de precios:', resultados);
         return `Servicios disponibles:\n${resultados}`;
       },
       {
         name: 'listPrices',
-        description: 'Lista precios por productos',
+        description:
+          'Lista precios por productos, solo se ofrecen estos servicios. Si no existen se dice que no se tiene el servicio',
         schema: z.object({}),
       },
     );
@@ -118,7 +117,7 @@ export class PruebaService implements OnModuleInit {
       },
       {
         name: 'aboutAfiliamos',
-        description: 'Información sobre Afilismos',
+        description: 'Información sobre Afiliamos',
         schema: z.object({}),
       },
     );
@@ -148,7 +147,7 @@ export class PruebaService implements OnModuleInit {
       },
       {
         name: 'risks',
-        description: 'Informacion sobre Riesgos ARL',
+        description: 'Informacion sobre nivel de riesgos ARL',
         schema: z.object({}),
       },
     );
@@ -163,7 +162,8 @@ export class PruebaService implements OnModuleInit {
       },
       {
         name: 'form',
-        description: 'Formulario para crear la afiliacion',
+        description:
+          'Formulario o documentos requeridos para realizar la afiliacion',
         schema: z.object({}),
       },
     );
@@ -340,7 +340,7 @@ export class PruebaService implements OnModuleInit {
     const llmCall = async (state: typeof MessagesAnnotation.State) => {
       // Optimized shorter system prompt
       const systemPrompt =
-        'Asistente Servicios: Saluda la empresa se llama afiliamos, pregunta sobre los servicios;  ofrece todos los servicios; si piden uno específico, muestra todos los precios; si el nivel es desconocido, usa la herramienta de riesgos; al elegir producto, abre el formulario para valores; cuando los datos sean obtenidos decir en un momento un asesor se contactara contigo para generar el pago';
+        'Asistente Servicios: Saluda la empresa se llama afiliamos, pregunta sobre los servicios;  ofrece todos los servicios; si piden uno específico, muestra todos los precios; al elegir producto,si ya se sabe el producto a comprar envia el formulario; cuando los datos sean obtenidos decir en un momento un asesor se contactara contigo para generar el pago';
       const systemMessage = { role: 'system', content: systemPrompt };
 
       // Improved token counting and trimming
