@@ -8,6 +8,7 @@ import { EmailService } from './email/email.service';
 import { CalendarService } from './calendar/calendar.service';
 import { EmailController } from './email/email.controller';
 import { PruebaService } from './agent/agent.service';
+import { AgentOpenIaService } from './agent/agent-open-ia/agent-open-ia.service';
 import { PruebaController } from './agent/agentController/agent.controller';
 import { DatabaseModule } from './database/database.module';
 import { ConversationLogModule } from './conversation-log/conversation-log.module';
@@ -34,6 +35,7 @@ import { ScheduleModule } from '@nestjs/schedule';
     EmailService,
     CalendarService,
     PruebaService,
+    AgentOpenIaService,
   ],
 })
 export class AppModule {}

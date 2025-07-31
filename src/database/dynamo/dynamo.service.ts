@@ -7,6 +7,7 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { ConfigService } from '@nestjs/config';
 import {
   DynamoDBDocumentClient,
+  GetCommand,
   PutCommand,
   QueryCommand,
   ScanCommand,
@@ -336,5 +337,41 @@ export class DynamoService {
       success: true,
       message: 'Cita creada con éxito',
     };
+  }
+
+  async getConversationHistory(userId: string): Promise<string | undefined> {
+    const command = new GetCommand({
+      TableName: 'ConversationHistory',
+      Key: {
+        userId: userId,
+      },
+    });
+
+    try {
+      const result = await this.docClient.send(command);
+      return result.Item?.history;
+    } catch (error) {
+      console.error('Error getting conversation history from DynamoDB', error);
+      return undefined;
+    }
+  }
+
+  async saveConversationHistory(
+    userId: string,
+    history: string,
+  ): Promise<void> {
+    const command = new PutCommand({
+      TableName: 'ConversationHistory',
+      Item: {
+        userId: userId,
+        history: history,
+      },
+    });
+
+    try {
+      await this.docClient.send(command);
+    } catch (error) {
+      console.error('Error saving conversation history to DynamoDB', error);
+    }
   }
 }

@@ -578,6 +578,7 @@ export class PruebaService implements OnModuleInit {
     result: any,
   ): Promise<any> {
     try {
+      this.logger.debug('Starting summarization process, ', trimmedMessages);
       const summaryPrompt =
         'Resumen: extrae datos importantes (precios, servicios elegidos, datos formulario)';
       const summaryMessage = await llm.invoke([
