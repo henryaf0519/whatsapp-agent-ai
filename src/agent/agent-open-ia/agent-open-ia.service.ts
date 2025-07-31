@@ -261,7 +261,7 @@ export class AgentOpenIaService implements OnModuleInit {
 
       const risks = tool({
         name: 'risks',
-        description: 'Información sobre niveles de riesgo ARL',
+        description: 'Información sobre niveles, o niveles de riesgo o riesgo',
         parameters: z.object({}),
         async execute(): Promise<string> {
           try {
@@ -413,26 +413,36 @@ export class AgentOpenIaService implements OnModuleInit {
           }
         },
       });
-      this.orchestratorAgent = new Agent({
-        name: 'Asistente de afiliaciones',
-        instructions: `
-          Eres un asistente de afiliamos que puede usar las herramientas para ayudar a los usuarios.:
-          Saluda, pregunta por servicios, muestra precios, solicita formulario cuando elijan servicio, confirma que asesor contactará para pago.
-          **Consideraciones Adicionales:**
-          - Siempre prioriza la última intención del usuario.
-          - Si el historial de conversación ha sido resumido (lo verás al inicio), utiliza el resumen y la última interacción para mantener el contexto. No reinicies la conversación si ya se ha avanzado en el proceso.
- 
-        `,
+
+      const faqAgent = new Agent({
+        name: 'FAQ Agent',
+        instructions:
+          'Eres un agente especializado en responder preguntas sobre Afiliamos, sus servicios y niveles de riesgo. Usa la herramienta de `risks` inmediatamente cuando te pregunten por riesgos o niveles. Para preguntas sobre la empresa usa la herramienta `aboutAfiliamos` y para servicios `servicesAfiliamos`',
         model: this.MODEL_NAME,
-        tools: [
-          membershipPrices,
-          policyPrices,
-          about,
-          services,
-          risks,
-          form,
-          createUser,
-        ],
+        tools: [about, services, risks],
+      });
+
+      const priceAgent = new Agent({
+        name: 'Price Agent',
+        instructions:
+          'Eres un agente especializado en responder preguntas sobre precios de afiliaciones y pólizas.',
+        model: this.MODEL_NAME,
+        tools: [membershipPrices, policyPrices],
+      });
+
+      const finishSale = new Agent({
+        name: 'Finish Sale Agent',
+        instructions:
+          'Eres un agente especializado en finalizar ventas de afiliaciones y pólizas. cuando el usuario escoga el servicio que desea tomar  usa el formulario para recopilar datos del usuario y crear un nuevo usuario en la base de datos. Al crear el usuario, dile que un asesor se pondrá en contacto con él para finalizar la venta.',
+        model: this.MODEL_NAME,
+        tools: [form, createUser],
+      });
+
+      this.orchestratorAgent = new Agent({
+        name: 'Orchestrator Agent',
+        instructions: `Eres un agente de clasificación. Saluda cuando un usuario inicia la conversacion. Analiza la intención del usuario y delega la conversación al agente de Precios, al de Preguntas Frecuentes o al de finalizar la compra. No respondas directamente.`,
+        model: this.MODEL_NAME,
+        handoffs: [priceAgent, faqAgent, finishSale],
       });
     } catch (error) {
       this.logger.error('Failed to initialize tools', error);
