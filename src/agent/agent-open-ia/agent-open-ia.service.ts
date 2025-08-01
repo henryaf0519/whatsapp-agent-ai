@@ -6,17 +6,12 @@
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
-import {
-  Agent,
-  tool,
-  run,
-  setDefaultOpenAIKey,
-  withTrace,
-} from '@openai/agents';
+import { Agent, tool, run, withTrace } from '@openai/agents';
 import { ConfigService } from '@nestjs/config';
 import { z } from 'zod';
 import { DynamoService } from 'src/database/dynamo/dynamo.service';
 import { Pinecone } from '@pinecone-database/pinecone';
+import { SemanticCacheService } from 'src/semantic-cache/semantic-cache.service';
 
 interface PineconeSearchResult {
   fields?: { text?: string; tipo?: string };
@@ -25,16 +20,15 @@ interface PineconeSearchResult {
 @Injectable()
 export class AgentOpenIaService implements OnModuleInit {
   private readonly logger = new Logger(AgentOpenIaService.name);
-  private agent!: any;
   private orchestratorAgent!: any;
   private synthesizerAgent!: any;
   private readonly MODEL_NAME = 'gpt-4o-mini';
   private pineconeNamespace: any = null;
-  private conversationHistories: Map<string, string> = new Map();
 
   constructor(
     private config: ConfigService,
     private readonly dynamoService: DynamoService,
+    private readonly semanticCacheService: SemanticCacheService,
   ) {
     this.validateEnvironmentVariables();
   }
@@ -417,7 +411,7 @@ export class AgentOpenIaService implements OnModuleInit {
       const faqAgent = new Agent({
         name: 'FAQ Agent',
         instructions:
-          'Eres un agente especializado en responder preguntas sobre Afiliamos, sus servicios y niveles de riesgo. Usa la herramienta de `risks` inmediatamente cuando te pregunten por riesgos o niveles. Para preguntas sobre la empresa usa la herramienta `aboutAfiliamos` y para servicios `servicesAfiliamos`',
+          'Eres un experto en Afiliamos. Regla: Solo la afiliación a salud es individual, pensión, riesgos y caja deben ir combinadas. Herramientas: usa risks para riesgos o niveles,aboutAfiliamos para información de la empresa y services  para servicios. Instrucción: Usa solo estas reglas y herramientas para responder. No inventes información.',
         model: this.MODEL_NAME,
         tools: [about, services, risks],
       });
@@ -425,7 +419,7 @@ export class AgentOpenIaService implements OnModuleInit {
       const priceAgent = new Agent({
         name: 'Price Agent',
         instructions:
-          'Eres un agente especializado en responder preguntas sobre precios de afiliaciones y pólizas.',
+          'Eres un agente especializado en responder preguntas sobre precios de afiliaciones y pólizas. No des informacion adicional',
         model: this.MODEL_NAME,
         tools: [membershipPrices, policyPrices],
       });
@@ -440,7 +434,7 @@ export class AgentOpenIaService implements OnModuleInit {
 
       this.orchestratorAgent = new Agent({
         name: 'Orchestrator Agent',
-        instructions: `Eres un agente de clasificación. Saluda cuando un usuario inicia la conversacion. Analiza la intención del usuario y delega la conversación al agente de Precios, al de Preguntas Frecuentes o al de finalizar la compra. No respondas directamente.`,
+        instructions: `Eres un agente de casificación. Saluda cuando un usuario inicia la conversacion. Analiza la intención del usuario y delega la conversación al agente de Precios, al de Preguntas Frecuentes o al de finalizar la compra. No respondas directamente.`,
         model: this.MODEL_NAME,
         handoffs: [priceAgent, faqAgent, finishSale],
       });
@@ -475,9 +469,24 @@ export class AgentOpenIaService implements OnModuleInit {
   async hablar(userId: string, message: string): Promise<string> {
     let userHistory =
       (await this.dynamoService.getConversationHistory(userId)) || '';
-
     const currentUserMessage = `User: ${message}`;
     userHistory += currentUserMessage + '\n';
+
+    const cachedResponse =
+      await this.semanticCacheService.getAgentResponse(message);
+
+    if (cachedResponse && !cachedResponse.startsWith('[Respuesta del LLM]')) {
+      this.logger.log(
+        `[Cache Hit] Devolviendo respuesta de la caché para el usuario ${userId}`,
+      );
+      const cacheResponseForHistory = `AI: ${cachedResponse}\n`;
+      userHistory += cacheResponseForHistory;
+
+      // 4.b ... Guardamos el historial completo en DynamoDB
+      await this.dynamoService.saveConversationHistory(userId, userHistory);
+      return cachedResponse;
+    }
+
     let agentResponse = 'Lo siento, no pude procesar tu solicitud.';
     let actualAgentFinalOutput = '';
 

@@ -13,6 +13,7 @@ import { PruebaController } from './agent/agentController/agent.controller';
 import { DatabaseModule } from './database/database.module';
 import { ConversationLogModule } from './conversation-log/conversation-log.module';
 import { ScheduleModule } from '@nestjs/schedule';
+import { SemanticCacheService } from './semantic-cache/semantic-cache.service';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { ScheduleModule } from '@nestjs/schedule';
     CalendarService,
     PruebaService,
     AgentOpenIaService,
+    SemanticCacheService,
   ],
 })
 export class AppModule {}
