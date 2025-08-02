@@ -141,7 +141,8 @@ export class AgentOpenIaService implements OnModuleInit {
       const self = this;
       const membershipPrices = tool({
         name: 'membershipPrices',
-        description: 'Obtiene precios de afiliaciones disponibles',
+        description:
+          'Obtiene precios de afiliacionesa a seguridad social disponibles',
         parameters: z.object({}),
         async execute(): Promise<string> {
           try {
