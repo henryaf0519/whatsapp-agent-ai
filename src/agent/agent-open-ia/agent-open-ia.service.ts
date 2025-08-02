@@ -199,7 +199,7 @@ export class AgentOpenIaService implements OnModuleInit {
 
       const about = tool({
         name: 'aboutAfiliamos',
-        description: 'Información sobre la empresa Afiliamos',
+        description: 'Informacion sobre la empresa Afiliamos',
         parameters: z.object({}),
         async execute(): Promise<string> {
           try {
@@ -228,7 +228,8 @@ export class AgentOpenIaService implements OnModuleInit {
 
       const services = tool({
         name: 'servicesAfiliamos',
-        description: 'Servicios ofrecidos por Afiliamos',
+        description:
+          'Busca y devuelve la información de los servicios de Afiliamos. Usa esta herramienta para responder a preguntas como "¿Qué servicios ofrecen?", "¿Dime los productos que tienen?" o "Quiero saber más sobre sus opciones".',
         parameters: z.object({}),
         async execute(): Promise<string> {
           try {
@@ -255,7 +256,8 @@ export class AgentOpenIaService implements OnModuleInit {
 
       const risks = tool({
         name: 'risks',
-        description: 'Información sobre niveles, o niveles de riesgo o riesgo',
+        description:
+          'Responde a preguntas sobre los niveles de riesgo de ARL. Úsala para temas de "riesgo", "niveles" de ARL',
         parameters: z.object({}),
         async execute(): Promise<string> {
           try {
@@ -411,7 +413,7 @@ export class AgentOpenIaService implements OnModuleInit {
       const faqAgent = new Agent({
         name: 'FAQ Agent',
         instructions:
-          'Eres un experto en Afiliamos. Regla: Solo la afiliación a salud es individual, pensión, riesgos y caja deben ir combinadas. Herramientas: usa risks para riesgos o niveles,aboutAfiliamos para información de la empresa y services  para servicios. Instrucción: Usa solo estas reglas y herramientas para responder. No inventes información.',
+          'Eres un experto en los servicios de Afiliamos. Tu objetivo es responder preguntas frecuentes utilizando únicamente las herramientas que te han sido proporcionadas. Reglas: 1. Si la pregunta es sobre afiliación a salud, responde que es la única que puede ser individual. 2. Si la afiliación es a pensión, riesgos o caja, responde que deben ir combinadas con otras opciones.',
         model: this.MODEL_NAME,
         tools: [about, services, risks],
       });
@@ -419,7 +421,7 @@ export class AgentOpenIaService implements OnModuleInit {
       const priceAgent = new Agent({
         name: 'Price Agent',
         instructions:
-          'Eres un agente especializado en responder preguntas sobre precios de afiliaciones y pólizas. No des informacion adicional',
+          'Eres un agente especializado en dar precios. Tu única función es citar precios exactos usando las herramientas proporcionadas. Si no encuentras un precio, pide amablemente más detalles. Después de citar un precio, impulsa la venta preguntando al usuario si desea iniciar el proceso de pago.',
         model: this.MODEL_NAME,
         tools: [membershipPrices, policyPrices],
       });
@@ -434,7 +436,7 @@ export class AgentOpenIaService implements OnModuleInit {
 
       this.orchestratorAgent = new Agent({
         name: 'Orchestrator Agent',
-        instructions: `Eres un agente de casificación. Saluda cuando un usuario inicia la conversacion. Analiza la intención del usuario y delega la conversación al agente de Precios, al de Preguntas Frecuentes o al de finalizar la compra. No respondas directamente.`,
+        instructions: `Eres un agente de clasificación. Tu única tarea es dirigir la conversación al agente más adecuado. Reglas estrictas: 1. Si la pregunta es sobre reglas de pago, afiliación o servicios, delega al agente de Preguntas Frecuentes. 2. Si la pregunta es exclusivamente sobre precios o costos, delega al agente de Precios. 3. Si el usuario expresa una intención clara de contratar, delega al agente de Finalizar la venta. 4. Nunca respondas directamente.`,
         model: this.MODEL_NAME,
         handoffs: [priceAgent, faqAgent, finishSale],
       });
@@ -470,21 +472,28 @@ export class AgentOpenIaService implements OnModuleInit {
     let userHistory =
       (await this.dynamoService.getConversationHistory(userId)) || '';
     const currentUserMessage = `User: ${message}`;
-    userHistory += currentUserMessage + '\n';
-
-    const cachedResponse =
-      await this.semanticCacheService.getAgentResponse(message);
-
-    if (cachedResponse && !cachedResponse.startsWith('[Respuesta del LLM]')) {
-      this.logger.log(
-        `[Cache Hit] Devolviendo respuesta de la caché para el usuario ${userId}`,
-      );
-      const cacheResponseForHistory = `AI: ${cachedResponse}\n`;
-      userHistory += cacheResponseForHistory;
-
-      // 4.b ... Guardamos el historial completo en DynamoDB
+    if (userHistory === '') {
+      const genericMessage =
+        'Hola bienvenido  a Afiliamos. ¿Te gustaría conocer nuestros servicios, precios de afiliación o pagar tu mensualidad?';
+      userHistory += currentUserMessage + '\n';
+      userHistory += `AI: ${genericMessage}\n`;
       await this.dynamoService.saveConversationHistory(userId, userHistory);
-      return cachedResponse;
+      return genericMessage;
+    }
+    userHistory += currentUserMessage + '\n';
+    if (message.length <= 50) {
+      const cachedResponse =
+        await this.semanticCacheService.getAgentResponse(message);
+
+      if (cachedResponse && !cachedResponse.startsWith('[Respuesta del LLM]')) {
+        this.logger.log(
+          `[Cache Hit] Devolviendo respuesta de la caché para el usuario ${userId}`,
+        );
+        const cacheResponseForHistory = `AI: ${cachedResponse}\n`;
+        userHistory += cacheResponseForHistory;
+        await this.dynamoService.saveConversationHistory(userId, userHistory);
+        return cachedResponse;
+      }
     }
 
     let agentResponse = 'Lo siento, no pude procesar tu solicitud.';
@@ -526,7 +535,9 @@ export class AgentOpenIaService implements OnModuleInit {
       } else {
         userHistory += `AI: ${actualAgentFinalOutput}\n`;
       }
-
+      if (message.length <= 50) {
+        await this.semanticCacheService.trackAndCache(message, agentResponse);
+      }
       await this.dynamoService.saveConversationHistory(userId, userHistory);
     });
 
