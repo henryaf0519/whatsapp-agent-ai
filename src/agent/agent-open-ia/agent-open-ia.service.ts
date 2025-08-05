@@ -484,14 +484,14 @@ export class AgentOpenIaService implements OnModuleInit {
 
       const users = new Agent({
         name: 'User Agent',
-        instructions: `Eres un experto en los servicios de Afiliamos. Tu objetivo es buscar usuarios en base de datos. Pedir el numero de documento del cliente y buscarlo en base de datos. 1. Si el usuario no existe, informa que no se encontró ningún usuario con ese documento. 2. Si el usuario existe, llamalo por su nombre y dile que un asesor se pondrá en contacto con él para finalizar la venta. No lo saludes solo responde con el nombre del usuario y el mensaje.`,
+        instructions: `Eres un experto en los servicios de Afiliamos.**Para hacer la conversación más amigable y moderna, utiliza emojis relevantes al final de tus respuestas.** Tu objetivo es buscar usuarios en base de datos. Pedir el numero de documento del cliente y buscarlo en base de datos. 1. Si el usuario no existe, informa que no se encontró ningún usuario con ese documento. 2. Si el usuario existe, llamalo por su nombre y dile que un asesor se pondrá en contacto con él para finalizar la venta. No lo saludes solo responde con el nombre del usuario y el mensaje.`,
         model: this.MODEL_NAME,
         tools: [findUser],
       });
 
       const faqAgent = new Agent({
         name: 'FAQ Agent',
-        instructions: `Eres un experto en los servicios de Afiliamos. Tu objetivo es responder preguntas usando solo tus herramientas. REGLAS DE MÁXIMA PRIORIDAD (DEBES SEGUIRLAS SIEMPRE): 1. SIEMPRE USA LAS HERRAMIENTAS PRIMERO. Tu única fuente de información son tus herramientas. No uses conocimiento propio. Si la pregunta contiene palabras como "riesgo", "niveles" o "ARL", DEBES usar la herramienta risks. Si la pregunta está relacionada con el tema de la herramienta, úsala obligatoriamente. REGLAS SECUNDARIAS (Úsalas si no hay una herramienta aplicable): 2. Si la pregunta es sobre afiliación a salud, responde que es la única que puede ser individual. 3. Si la afiliación es a pensión, riesgos o caja, responde que deben ir combinadas con otras opciones. REGLA DE FALLO SEGURO (Úsala solo como último recurso): 4. Si no puedes dar una respuesta precisa, responde amablemente que no tienes la información y que debe contactar con un asesor.`,
+        instructions: `Eres un experto en los servicios de Afiliamos.**Para hacer la conversación más amigable y moderna, utiliza emojis relevantes al final de tus respuestas.** Tu objetivo es responder preguntas usando solo tus herramientas. REGLAS DE MÁXIMA PRIORIDAD (DEBES SEGUIRLAS SIEMPRE): 1. SIEMPRE USA LAS HERRAMIENTAS PRIMERO. Tu única fuente de información son tus herramientas. No uses conocimiento propio. Si la pregunta contiene palabras como "riesgo", "niveles" o "ARL", DEBES usar la herramienta risks. Si la pregunta está relacionada con el tema de la herramienta, úsala obligatoriamente. REGLAS SECUNDARIAS (Úsalas si no hay una herramienta aplicable): 2. Si la pregunta es sobre afiliación a salud, responde que es la única que puede ser individual. 3. Si la afiliación es a pensión, riesgos o caja, responde que deben ir combinadas con otras opciones. REGLA DE FALLO SEGURO (Úsala solo como último recurso): 4. Si no puedes dar una respuesta precisa, responde amablemente que no tienes la información y que debe contactar con un asesor.`,
         model: this.MODEL_NAME,
         tools: [about, services, risks],
       });
@@ -499,7 +499,7 @@ export class AgentOpenIaService implements OnModuleInit {
       const priceAgent = new Agent({
         name: 'Price Agent',
         instructions:
-          'Eres un agente especializado en dar precios de afiliación. Tu única función es citar precios exactos usando las herramientas proporcionadas. Para comenzar, debes llamar a la herramienta `activityEconomic` y mostrar al usuario su contenido para que pueda saber si es independiente o dependiente. Después de que el usuario responda, usa la herramienta `independentPrices` o `dependentPrices` según el caso para citar un precio exacto. Finalmente, impulsa la venta preguntando al usuario si desea iniciar el proceso de pago.',
+          'Eres un agente especializado en dar precios de afiliación. **Para hacer la conversación más amigable y moderna, utiliza emojis relevantes al final de tus respuestas.** Tu única función es citar precios exactos usando las herramientas proporcionadas. Para comenzar, debes llamar a la herramienta `activityEconomic` y mostrar al usuario su contenido para que pueda saber si es independiente o dependiente. Después de que el usuario responda, usa la herramienta `independentPrices` o `dependentPrices` según el caso para citar un precio exacto. Finalmente, impulsa la venta preguntando al usuario si desea iniciar el proceso de pago.',
         model: this.MODEL_NAME,
         tools: [
           independentPrices,
@@ -512,7 +512,7 @@ export class AgentOpenIaService implements OnModuleInit {
       const finishSale = new Agent({
         name: 'Finish Sale Agent',
         instructions:
-          'Eres un agente especializado en finalizar ventas de afiliaciones y pólizas. cuando el usuario escoga el servicio que desea tomar  usa el formulario para recopilar datos del usuario y crear un nuevo usuario en la base de datos. Al crear el usuario, dile que un asesor se pondrá en contacto con él para finalizar la venta.',
+          'Eres un agente especializado en finalizar ventas de afiliaciones y pólizas. **Para hacer la conversación más amigable y moderna, utiliza emojis relevantes al final de tus respuestas.** cuando el usuario escoga el servicio que desea tomar  usa el formulario para recopilar datos del usuario y crear un nuevo usuario en la base de datos. Al crear el usuario, dile que un asesor se pondrá en contacto con él para finalizar la venta.',
         model: this.MODEL_NAME,
         tools: [form, createUser],
       });
@@ -556,8 +556,8 @@ export class AgentOpenIaService implements OnModuleInit {
       (await this.dynamoService.getConversationHistory(userId)) || '';
     const currentUserMessage = `User: ${message}`;
     if (userHistory === '') {
-      const genericMessage =
-        'Hola bienvenido  a Afiliamos. ¿Te gustaría conocer nuestros servicios, precios de afiliación o pagar tu mensualidad?';
+      const genericMessage = `
+      ¡Hola! 👋 Bienvenido a Afiliamos. ¿En qué podemos ayudarte hoy?\n🚀 Quieres conocer nuestros servicios?\n💰 Precios de afiliación a seguridad social?\n💳 Pagar tu mensualidad? (para clientes frecuentes)`;
       userHistory += currentUserMessage + '\n';
       userHistory += `AI: ${genericMessage}\n`;
       await this.dynamoService.saveConversationHistory(userId, userHistory);
