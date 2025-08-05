@@ -374,4 +374,22 @@ export class DynamoService {
       console.error('Error saving conversation history to DynamoDB', error);
     }
   }
+
+  async findUser(doc) {
+    const command = new GetCommand({
+      TableName: 'users_monthly',
+      Key: {
+        id: doc,
+      },
+    });
+
+    try {
+      const result = await this.docClient.send(command);
+      console.log('User found:', result);
+      return result.Item;
+    } catch (error) {
+      console.error('Error getting conversation history from DynamoDB', error);
+      return undefined;
+    }
+  }
 }

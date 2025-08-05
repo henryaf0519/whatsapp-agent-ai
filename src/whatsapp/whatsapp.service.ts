@@ -171,7 +171,6 @@ export class WhatsappService {
 
       let lastError: Error | null = null;
 
-      // Retry logic
       for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
         try {
           const response: AxiosResponse<WhatsAppApiResponse> = await axios.post(
@@ -182,7 +181,7 @@ export class WhatsappService {
                 Authorization: `Bearer ${this.whatsappToken}`,
                 'Content-Type': 'application/json',
               },
-              timeout: 10000, // 10 seconds timeout
+              timeout: 5000, // 10 seconds timeout
             },
           );
           return response.data;

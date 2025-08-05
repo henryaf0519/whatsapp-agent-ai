@@ -13,7 +13,6 @@ import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { AgentOpenIaService } from 'src/agent/agent-open-ia/agent-open-ia.service';
-import { json } from 'stream/consumers';
 
 interface WhatsAppMessage {
   from: string; // El número de teléfono del remitente

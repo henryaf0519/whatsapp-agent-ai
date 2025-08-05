@@ -139,10 +139,10 @@ export class AgentOpenIaService implements OnModuleInit {
   private initializeTools(): void {
     try {
       const self = this;
-      const membershipPrices = tool({
-        name: 'membershipPrices',
+      const independentPrices = tool({
+        name: 'independentPrices',
         description:
-          'Obtiene precios de afiliacionesa a seguridad social disponibles',
+          'Obtiene precios de afiliacionesa a seguridad social para personas independientes',
         parameters: z.object({}),
         async execute(): Promise<string> {
           try {
@@ -166,6 +166,16 @@ export class AgentOpenIaService implements OnModuleInit {
             self.logger.error('Error in membershipPrices tool', error);
             return 'Error al obtener precios de afiliaciones. Intente nuevamente.';
           }
+        },
+      });
+
+      const dependentPrices = tool({
+        name: 'dependentPrices',
+        description:
+          'Obtiene precios de afiliacionesa a seguridad social para personas dependientes',
+        parameters: z.object({}),
+        execute() {
+          return 'Salud : 50.000 | Pensión: 50.000 | Riesgos: 20.000 | Caja: 10.000';
         },
       });
 
@@ -195,6 +205,16 @@ export class AgentOpenIaService implements OnModuleInit {
             self.logger.error('Error in policyPrices tool', error);
             return 'Error al obtener precios de pólizas. Intente nuevamente.';
           }
+        },
+      });
+
+      const activityEconomic = tool({
+        name: 'activityEconomic',
+        description: `Con esta tool le puedes decir al usuario si es independiente o dependiente`,
+        parameters: z.object({}),
+        execute() {
+          return `Dependientes:\nSe afilian como dependiente las personas que deseen por voluntad propia pagar su seguridad social, o que le exijan tener riesgos laborales\n
+           Indepentienes:\n se afilian como independientes las personas que tienen un contrato con el estado sea de la alcaldia-sena-gobernacion e.t.c o que tengan un contrato con una empresa y les exiga la planilla bajo su propio nombre, o que declaren renta`;
         },
       });
 
@@ -411,6 +431,64 @@ export class AgentOpenIaService implements OnModuleInit {
         },
       });
 
+      const findUser = tool({
+        name: 'findUser',
+        description: 'Busca un usuario por número de documento',
+        parameters: z.object({
+          doc: z.string().min(1, 'Documento es requerido'),
+        }),
+        async execute({ doc }): Promise<string | object> {
+          // Cambia el tipo de retorno para incluir un objeto
+          try {
+            // ... (parte de validación de entrada, que parece ser un patrón de tu código)
+            const requiredFields = {
+              doc: 'Documento',
+            };
+
+            const params = {
+              doc,
+            };
+
+            for (const [field, label] of Object.entries(requiredFields)) {
+              // Asumiendo que `self.validateInput` es un método que valida los campos
+              self.validateInput(params[field], label);
+            }
+
+            self.logger.log(`Find user Doc: ${doc}`);
+
+            // Utiliza el método de servicio para buscar el usuario por documento
+            const user = await self.dynamoService.findUser(doc);
+
+            if (!user) {
+              // Si no se encuentra el usuario, se lanza un error
+              return `❌ No se encontró ningún usuario con el documento ${doc}`;
+            }
+
+            self.logger.log(`User found successfully: ${user.nombre}`);
+
+            // Retorna un objeto con los campos solicitados
+            return {
+              nombre: user.nombre,
+              identificacion: user.identificacion,
+              pago: user.pago,
+            };
+          } catch (error: unknown) {
+            const errorMessage =
+              error instanceof Error ? error.message : 'Error inesperado';
+            self.logger.error(`Error finding user: ${errorMessage}`, error);
+            // Retorna un objeto de error para que sea fácil de manejar en el código cliente
+            return { error: `❌ Error al buscar usuario: ${errorMessage}` };
+          }
+        },
+      });
+
+      const users = new Agent({
+        name: 'User Agent',
+        instructions: `Eres un experto en los servicios de Afiliamos. Tu objetivo es buscar usuarios en base de datos. Pedir el numero de documento del cliente y buscarlo en base de datos. 1. Si el usuario no existe, informa que no se encontró ningún usuario con ese documento. 2. Si el usuario existe, llamalo por su nombre y dile que un asesor se pondrá en contacto con él para finalizar la venta. No lo saludes solo responde con el nombre del usuario y el mensaje.`,
+        model: this.MODEL_NAME,
+        tools: [findUser],
+      });
+
       const faqAgent = new Agent({
         name: 'FAQ Agent',
         instructions: `Eres un experto en los servicios de Afiliamos. Tu objetivo es responder preguntas usando solo tus herramientas. REGLAS DE MÁXIMA PRIORIDAD (DEBES SEGUIRLAS SIEMPRE): 1. SIEMPRE USA LAS HERRAMIENTAS PRIMERO. Tu única fuente de información son tus herramientas. No uses conocimiento propio. Si la pregunta contiene palabras como "riesgo", "niveles" o "ARL", DEBES usar la herramienta risks. Si la pregunta está relacionada con el tema de la herramienta, úsala obligatoriamente. REGLAS SECUNDARIAS (Úsalas si no hay una herramienta aplicable): 2. Si la pregunta es sobre afiliación a salud, responde que es la única que puede ser individual. 3. Si la afiliación es a pensión, riesgos o caja, responde que deben ir combinadas con otras opciones. REGLA DE FALLO SEGURO (Úsala solo como último recurso): 4. Si no puedes dar una respuesta precisa, responde amablemente que no tienes la información y que debe contactar con un asesor.`,
@@ -421,9 +499,14 @@ export class AgentOpenIaService implements OnModuleInit {
       const priceAgent = new Agent({
         name: 'Price Agent',
         instructions:
-          'Eres un agente especializado en dar precios. Tu única función es citar precios exactos usando las herramientas proporcionadas. Si no encuentras un precio, pide amablemente más detalles. Después de citar un precio, impulsa la venta preguntando al usuario si desea iniciar el proceso de pago.',
+          'Eres un agente especializado en dar precios de afiliación. Tu única función es citar precios exactos usando las herramientas proporcionadas. Para comenzar, debes llamar a la herramienta `activityEconomic` y mostrar al usuario su contenido para que pueda saber si es independiente o dependiente. Después de que el usuario responda, usa la herramienta `independentPrices` o `dependentPrices` según el caso para citar un precio exacto. Finalmente, impulsa la venta preguntando al usuario si desea iniciar el proceso de pago.',
         model: this.MODEL_NAME,
-        tools: [membershipPrices, policyPrices],
+        tools: [
+          independentPrices,
+          dependentPrices,
+          policyPrices,
+          activityEconomic,
+        ],
       });
 
       const finishSale = new Agent({
@@ -436,9 +519,9 @@ export class AgentOpenIaService implements OnModuleInit {
 
       this.orchestratorAgent = new Agent({
         name: 'Orchestrator Agent',
-        instructions: `Eres un agente de clasificación. Tu única tarea es dirigir la conversación al agente más adecuado. Reglas estrictas: 1. Si la pregunta es sobre  afiliación, servicios, niveles o riesgos delega al agente de Preguntas Frecuentes. 2. Si la pregunta es exclusivamente sobre precios o costos, delega al agente de Precios. 3. Si el usuario expresa una intención clara de contratar, delega al agente de Finalizar la venta. 4. Nunca respondas directamente.`,
+        instructions: `Eres un agente de clasificación. Tu única tarea es dirigir la conversación al agente más adecuado. Reglas estrictas: 1. Si la pregunta es sobre  afiliación, servicios, niveles o riesgos delega al agente de Preguntas Frecuentes. 2. Si la pregunta es exclusivamente sobre precios o costos, delega al agente de Precios. 3. Si el usuario expresa una intención clara de contratar, delega al agente de Finalizar la venta. 4. Si el usuario quiere pagar mensualidad delega al agente de users 5. Nunca respondas directamente.`,
         model: this.MODEL_NAME,
-        handoffs: [priceAgent, faqAgent, finishSale],
+        handoffs: [priceAgent, faqAgent, finishSale, users],
       });
     } catch (error) {
       this.logger.error('Failed to initialize tools', error);
