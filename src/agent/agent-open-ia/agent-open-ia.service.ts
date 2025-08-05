@@ -258,7 +258,7 @@ export class AgentOpenIaService implements OnModuleInit {
       const risks = tool({
         name: 'risks',
         description:
-          'Responde a preguntas sobre los niveles de riesgo de ARL. Úsala para temas de "riesgo", "niveles" de ARL',
+          'Proporciona la lista de los niveles de riesgo de ARL y sus características. No uses esta herramienta para calcular el nivel de riesgo de un usuario, solo para mostrar la tabla de clasificación. Usa esta herramienta cuando el usuario pregunte por "riesgo", "niveles" de ARL o "clasificación".',
         parameters: z.object({}),
         async execute(): Promise<string> {
           try {
@@ -413,8 +413,7 @@ export class AgentOpenIaService implements OnModuleInit {
 
       const faqAgent = new Agent({
         name: 'FAQ Agent',
-        instructions:
-          'Eres un experto en los servicios de Afiliamos. Tu objetivo es responder preguntas frecuentes utilizando únicamente las herramientas que te han sido proporcionadas. Reglas: 1. Si la pregunta es sobre afiliación a salud, responde que es la única que puede ser individual. 2. Si la afiliación es a pensión, riesgos o caja, responde que deben ir combinadas con otras opciones.',
+        instructions: `Eres un experto en los servicios de Afiliamos. Tu objetivo es responder preguntas usando solo tus herramientas. REGLAS DE MÁXIMA PRIORIDAD (DEBES SEGUIRLAS SIEMPRE): 1. SIEMPRE USA LAS HERRAMIENTAS PRIMERO. Tu única fuente de información son tus herramientas. No uses conocimiento propio. Si la pregunta contiene palabras como "riesgo", "niveles" o "ARL", DEBES usar la herramienta risks. Si la pregunta está relacionada con el tema de la herramienta, úsala obligatoriamente. REGLAS SECUNDARIAS (Úsalas si no hay una herramienta aplicable): 2. Si la pregunta es sobre afiliación a salud, responde que es la única que puede ser individual. 3. Si la afiliación es a pensión, riesgos o caja, responde que deben ir combinadas con otras opciones. REGLA DE FALLO SEGURO (Úsala solo como último recurso): 4. Si no puedes dar una respuesta precisa, responde amablemente que no tienes la información y que debe contactar con un asesor.`,
         model: this.MODEL_NAME,
         tools: [about, services, risks],
       });
@@ -437,7 +436,7 @@ export class AgentOpenIaService implements OnModuleInit {
 
       this.orchestratorAgent = new Agent({
         name: 'Orchestrator Agent',
-        instructions: `Eres un agente de clasificación. Tu única tarea es dirigir la conversación al agente más adecuado. Reglas estrictas: 1. Si la pregunta es sobre reglas de pago, afiliación o servicios, delega al agente de Preguntas Frecuentes. 2. Si la pregunta es exclusivamente sobre precios o costos, delega al agente de Precios. 3. Si el usuario expresa una intención clara de contratar, delega al agente de Finalizar la venta. 4. Nunca respondas directamente.`,
+        instructions: `Eres un agente de clasificación. Tu única tarea es dirigir la conversación al agente más adecuado. Reglas estrictas: 1. Si la pregunta es sobre  afiliación, servicios, niveles o riesgos delega al agente de Preguntas Frecuentes. 2. Si la pregunta es exclusivamente sobre precios o costos, delega al agente de Precios. 3. Si el usuario expresa una intención clara de contratar, delega al agente de Finalizar la venta. 4. Nunca respondas directamente.`,
         model: this.MODEL_NAME,
         handoffs: [priceAgent, faqAgent, finishSale],
       });
@@ -482,7 +481,7 @@ export class AgentOpenIaService implements OnModuleInit {
       return genericMessage;
     }
     userHistory += currentUserMessage + '\n';
-    if (message.length <= 50) {
+    if (message.length <= 60) {
       const cachedResponse =
         await this.semanticCacheService.getAgentResponse(message);
 
@@ -512,14 +511,14 @@ export class AgentOpenIaService implements OnModuleInit {
       }
       actualAgentFinalOutput = orchestratorResult.finalOutput;
       agentResponse = actualAgentFinalOutput;
-      const MAX_HISTORY_LENGTH = 2000;
+      const MAX_HISTORY_LENGTH = 1000;
       if (userHistory.length > MAX_HISTORY_LENGTH) {
         try {
           const synthesizerResult = await run(
             this.synthesizerAgent,
             userHistory +
               '\n\n' +
-              'Por favor, resume esta conversación de forma concisa, centrándote en las solicitudes del usuario, sus elecciones y los datos que ha proporcionado. Omite saludos genéricos y detalles internos del asistente.',
+              'Por favor, resume esta conversación de forma concisa, centrándote en las solicitudes del usuario, sus elecciones, precio y los datos que ha proporcionado. Omite saludos genéricos y detalles internos del asistente.',
           );
           const summarizedContent = synthesizerResult.finalOutput;
 

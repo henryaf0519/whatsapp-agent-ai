@@ -12,7 +12,8 @@ import {
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
-import { PruebaService } from 'src/agent/agent.service';
+import { AgentOpenIaService } from 'src/agent/agent-open-ia/agent-open-ia.service';
+import { json } from 'stream/consumers';
 
 interface WhatsAppMessage {
   from: string; // El número de teléfono del remitente
@@ -21,7 +22,6 @@ interface WhatsAppMessage {
   text?: { body: string }; // Contenido del mensaje de texto
   type: string; // Tipo de mensaje (text, image, etc.)
 }
-
 interface WhatsAppChange {
   value: {
     messaging_product: string;
@@ -45,7 +45,6 @@ interface WhatsAppChange {
   };
   field: string;
 }
-
 interface WhatsAppMessagePayload {
   object: string;
   entry: Array<{
@@ -70,7 +69,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
 
   constructor(
     private readonly whatsappService: WhatsappService,
-    private readonly chatbotService: PruebaService,
+    private readonly chatbotService: AgentOpenIaService,
     private readonly configService: ConfigService,
   ) {
     this.validateConfiguration();
@@ -267,7 +266,6 @@ export class WhatsappWebhookController implements OnModuleDestroy {
     let processedMessages = 0;
 
     try {
-      // Validate payload structure
       const payload = this.validateWebhookPayload(req.body);
 
       // Process each entry
@@ -333,6 +331,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
   }
 
   private async processChange(change: WhatsAppChange): Promise<void> {
+    //this.logger.log('Processing change', JSON.stringify(change, null, 2));
     if (change.field !== 'messages') {
       return;
     }
@@ -341,7 +340,6 @@ export class WhatsappWebhookController implements OnModuleDestroy {
     if (!messages || messages.length === 0) {
       return;
     }
-
     // Process each message
     for (const message of messages) {
       try {
@@ -377,7 +375,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         threadId,
         text: messageText,
       });
-      const reply = await this.chatbotService.conversar(threadId, messageText);
+      const reply = await this.chatbotService.hablar(threadId, messageText);
 
       if (!reply || typeof reply !== 'string' || reply.trim().length === 0) {
         // Send a default error message
