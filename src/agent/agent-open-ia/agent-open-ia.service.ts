@@ -16,7 +16,17 @@ import { SemanticCacheService } from 'src/semantic-cache/semantic-cache.service'
 interface PineconeSearchResult {
   fields?: { text?: string; tipo?: string };
 }
+interface payLoad {
+  type: 'text' | 'button' | 'unsupported';
+  text?: string;
+  action?: string;
+}
 
+interface sendWhastappResponse {
+  type: 'plantilla' | 'texto';
+  template?: string;
+  text?: string;
+}
 @Injectable()
 export class AgentOpenIaService implements OnModuleInit {
   private readonly logger = new Logger(AgentOpenIaService.name);
@@ -551,22 +561,39 @@ export class AgentOpenIaService implements OnModuleInit {
     }
   }
 
-  async hablar(userId: string, message: string): Promise<string> {
+  async hablar(
+    userId: string,
+    payload: payLoad,
+  ): Promise<sendWhastappResponse> {
     let userHistory =
       (await this.dynamoService.getConversationHistory(userId)) || '';
-    const currentUserMessage = `User: ${message}`;
+    const currentUserMessage = `User: ${payload.text}`;
     if (userHistory === '') {
       const genericMessage = `
       ¡Hola! 👋 Bienvenido a Afiliamos. ¿En qué podemos ayudarte hoy?\n🚀 Quieres conocer nuestros servicios?\n💰 Precios de afiliación a seguridad social?\n💳 Pagar tu mensualidad? (para clientes frecuentes)`;
       userHistory += currentUserMessage + '\n';
       userHistory += `AI: ${genericMessage}\n`;
       await this.dynamoService.saveConversationHistory(userId, userHistory);
-      return genericMessage;
+      return {
+        type: 'plantilla',
+        template: 'activityeconomic',
+        text: '',
+      };
+    }
+    if (payload.type === 'button') {
+      const resp = this.validateMessagePayload(payload);
+      userHistory += `AI: ${resp}\n`;
+      return {
+        type: 'texto',
+        template: '',
+        text: resp,
+      };
     }
     userHistory += currentUserMessage + '\n';
-    if (message.length <= 60) {
-      const cachedResponse =
-        await this.semanticCacheService.getAgentResponse(message);
+    if (payload.text && payload.text.length <= 60) {
+      const cachedResponse = await this.semanticCacheService.getAgentResponse(
+        payload.text ?? '',
+      );
 
       if (cachedResponse && !cachedResponse.startsWith('[Respuesta del LLM]')) {
         this.logger.log(
@@ -575,7 +602,11 @@ export class AgentOpenIaService implements OnModuleInit {
         const cacheResponseForHistory = `AI: ${cachedResponse}\n`;
         userHistory += cacheResponseForHistory;
         await this.dynamoService.saveConversationHistory(userId, userHistory);
-        return cachedResponse;
+        return {
+          type: 'texto',
+          template: '',
+          text: cachedResponse,
+        };
       }
     }
 
@@ -618,12 +649,43 @@ export class AgentOpenIaService implements OnModuleInit {
       } else {
         userHistory += `AI: ${actualAgentFinalOutput}\n`;
       }
-      if (message.length <= 50) {
-        await this.semanticCacheService.trackAndCache(message, agentResponse);
+      if (payload.text && payload.text.length <= 50) {
+        await this.semanticCacheService.trackAndCache(
+          payload.text,
+          agentResponse,
+        );
       }
       await this.dynamoService.saveConversationHistory(userId, userHistory);
     });
 
+    return {
+      type: 'texto',
+      template: '',
+      text: agentResponse,
+    };
+  }
+
+  private validateMessagePayload(payload: payLoad): string {
+    // Aquí implementas la lógica para manejar cada botón.
+    // Puedes llamar a diferentes servicios o enviar plantillas.
+    let agentResponse = '';
+    switch (payload.action) {
+      case 'independiente_payload':
+        // Lógica para el botón "Independiente"
+        // Por ejemplo, enviar una nueva plantilla con las tarifas de independiente.
+        // agentResponse = await this.whatsappService.enviarPlantilla(userId, 'plantilla_tarifas_independiente');
+        agentResponse =
+          'Has seleccionado ser independiente. Te muestro las tarifas...';
+        break;
+      case 'dependiente_payload':
+        // Lógica para el botón "Dependiente"
+        agentResponse =
+          'Has seleccionado ser dependiente. Te explico los pasos...';
+        break;
+      default:
+        agentResponse = 'Opción no reconocida. Por favor, intenta de nuevo.';
+        break;
+    }
     return agentResponse;
   }
 }

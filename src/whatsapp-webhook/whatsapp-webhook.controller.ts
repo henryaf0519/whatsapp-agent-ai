@@ -18,7 +18,11 @@ interface WhatsAppMessage {
   from: string; // El número de teléfono del remitente
   id: string; // ID único del mensaje de WhatsApp
   timestamp: string; // Timestamp del mensaje
-  text?: { body: string }; // Contenido del mensaje de texto
+  text?: { body: string };
+  button?: {
+    payload: string; // El 'payload' del botón, un identificador único
+    text: string; // El texto visible del botón
+  }; // Contenido del mensaje de texto
   type: string; // Tipo de mensaje (text, image, etc.)
 }
 interface WhatsAppChange {
@@ -55,6 +59,19 @@ interface WhatsAppMessagePayload {
 interface ProcessedMessage {
   id: string;
   timestamp: number;
+}
+
+interface payLoad {
+  type: 'text' | 'button' | 'unsupported';
+  text?: string;
+  action?: string;
+}
+
+interface MessageContent {
+  type: 'text' | 'button' | 'unsupported';
+  body?: string; // Para mensajes de texto
+  payload?: string; // Para respuestas de botones
+  text?: string; // Para respuestas de botones
 }
 
 @Controller('whatsapp')
@@ -176,30 +193,52 @@ export class WhatsappWebhookController implements OnModuleDestroy {
     return payload as WhatsAppMessagePayload;
   }
 
-  private validateMessage(message: WhatsAppMessage): boolean {
+  private validateMessage(message: WhatsAppMessage): MessageContent | null {
     if (!message.from || !message.id) {
       this.logger.warn('Message missing required fields (from or id)', {
         message,
       });
-      return false;
+      return null;
     }
-
-    if (!message.text?.body || message.text.body.trim().length === 0) {
-      this.logger.debug('Message has no text content', {
+    if (message.type === 'button' && message.button) {
+      this.logger.debug('Message is a button reply', {
         messageId: message.id,
+        payload: message.button.payload,
+        text: message.button.text,
       });
-      return false;
+      return {
+        type: 'button',
+        payload: message.button.payload,
+        text: message.button.text,
+      };
     }
+    if (message.type === 'text' && message.text?.body) {
+      const textBody = message.text.body;
 
-    if (message.text.body.length > 4096) {
-      this.logger.warn('Message text too long', {
+      if (textBody.trim().length === 0 || textBody.length > 4096) {
+        this.logger.warn('Message text invalid (empty or too long)', {
+          messageId: message.id,
+          length: textBody.length,
+        });
+        return null;
+      }
+
+      this.logger.debug('Message is a text message', {
         messageId: message.id,
-        length: message.text.body.length,
+        body: textBody,
       });
-      return false;
+      return {
+        type: 'text',
+        body: textBody,
+      };
     }
-
-    return true;
+    this.logger.warn('Unsupported message type', {
+      messageId: message.id,
+      type: message.type,
+    });
+    return {
+      type: 'unsupported',
+    };
   }
 
   @Get('webhook')
@@ -355,37 +394,68 @@ export class WhatsappWebhookController implements OnModuleDestroy {
   }
 
   private async processMessage(message: WhatsAppMessage): Promise<void> {
+    let payload: payLoad | undefined = undefined;
     if (this.isDuplicate(message.id)) {
       return;
     }
-
+    const messageContent = this.validateMessage(message);
+    if (!messageContent) {
+      return;
+    }
     // Validate message
-    if (!this.validateMessage(message)) {
+    if (messageContent.type === 'button') {
+      payload = {
+        type: 'button',
+        action: messageContent.payload,
+        text: messageContent.text,
+      };
+
+      this.logger.log(
+        'Button message received',
+        JSON.stringify(payload, null, 2),
+      );
+    } else if (messageContent.type === 'text') {
+      payload = {
+        type: 'text',
+        text: (messageContent.body ?? '').trim(),
+      };
+      this.logger.log(
+        'Text message received',
+        JSON.stringify(payload, null, 2),
+      );
+    } else {
+      this.logger.warn('Unsupported message type received', {
+        messageId: message.id,
+        type: message.type,
+      });
       return;
     }
 
     const threadId = this.generateThreadId(message.from);
-    const messageText = message.text!.body.trim();
 
     try {
       // Get response from chatbot service
-      this.logger.log(`Processing message from ${message.from}`, {
-        messageId: message.id,
-        threadId,
-        text: messageText,
-      });
-      const reply = await this.chatbotService.hablar(threadId, messageText);
+      this.logger.log(
+        `Processing message from ${message.from}`,
+        JSON.stringify,
+      );
+      const reply = await this.chatbotService.hablar(threadId, payload);
 
-      if (!reply || typeof reply !== 'string' || reply.trim().length === 0) {
+      if (!reply) {
         // Send a default error message
         const defaultReply =
           'Lo siento, no pude procesar tu mensaje en este momento. Por favor, intenta de nuevo.';
         await this.whatsappService.sendMessage(message.from, defaultReply);
         return;
       }
-
-      // Send response via WhatsApp
-      await this.whatsappService.sendMessage(message.from, reply);
+      if (reply.type === 'plantilla') {
+        await this.whatsappService.sendTemplateMessage(
+          message.from,
+          reply.template || '',
+        );
+      } else {
+        await this.whatsappService.sendMessage(message.from, reply.text ?? '');
+      }
     } catch (error) {
       this.logger.error(
         'Error processing message with chatbot or sending response',

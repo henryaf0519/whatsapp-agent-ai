@@ -18,7 +18,10 @@ export class PruebaController {
   ) {
     //const reply = await this.chatbotService.conversar(threadId, message);
     //console.log('Received message:', message, 'in thread:', threadId);
-    const reply = await this.agentOpenIAService.hablar(threadId, message);
+    const reply = await this.agentOpenIAService.hablar(threadId, {
+      type: 'text',
+      text: message,
+    });
     return { reply: reply };
   }
 

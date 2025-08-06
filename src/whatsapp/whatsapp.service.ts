@@ -4,8 +4,10 @@ import axios, { AxiosError, AxiosResponse } from 'axios';
 
 interface WhatsAppMessageBody {
   messaging_product: string;
+  type?: string;
+  template?: object;
   to: string;
-  text: { body: string };
+  text?: { body: string };
 }
 
 interface WhatsAppApiResponse {
@@ -163,13 +165,121 @@ export class WhatsappService {
 
       const body: WhatsAppMessageBody = {
         messaging_product: 'whatsapp',
-        to: to.replace(/\D/g, ''), // Clean phone number
+        to: to.replace(/\D/g, ''),
         text: { body: message.trim() },
       };
 
       this.logger.log(`Enviando mensaje WhatsApp a: ${to}`);
 
       let lastError: Error | null = null;
+
+      for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
+        try {
+          const response: AxiosResponse<WhatsAppApiResponse> = await axios.post(
+            this.whatsappApiUrl,
+            body,
+            {
+              headers: {
+                Authorization: `Bearer ${this.whatsappToken}`,
+                'Content-Type': 'application/json',
+              },
+              timeout: 5000, // 10 seconds timeout
+            },
+          );
+          return response.data;
+        } catch (error) {
+          lastError = error as Error;
+
+          if (axios.isAxiosError(error)) {
+            // Don't retry on client errors (4xx) except 429
+            const status = error.response?.status;
+            if (status && status >= 400 && status < 500 && status !== 429) {
+              this.handleAxiosError(error, attempt);
+            }
+
+            // Retry on server errors (5xx) and 429
+            if (
+              attempt < this.maxRetries &&
+              (status === 429 || (status && status >= 500))
+            ) {
+              const delayMs = this.retryDelay * Math.pow(2, attempt - 1); // Exponential backoff
+              this.logger.warn(
+                `Reintentando envío de mensaje WhatsApp en ${delayMs}ms (Intento ${attempt}/${this.maxRetries})`,
+              );
+              await this.delay(delayMs);
+              continue;
+            }
+
+            this.handleAxiosError(error, attempt);
+          } else {
+            // Non-Axios error
+            if (attempt < this.maxRetries) {
+              const delayMs = this.retryDelay * attempt;
+              const errorMessage =
+                error instanceof Error ? error.message : String(error);
+              this.logger.warn(
+                `Error no-HTTP, reintentando en ${delayMs}ms (Intento ${attempt}/${this.maxRetries}): ${errorMessage}`,
+              );
+              await this.delay(delayMs);
+              continue;
+            }
+          }
+        }
+      }
+
+      // If we get here, all retries failed
+      const errorMessage = lastError?.message || 'Error desconocido';
+      this.logger.error(
+        `Falló el envío de mensaje WhatsApp después de ${this.maxRetries} intentos: ${errorMessage}`,
+      );
+      throw new HttpException(
+        `Error al enviar mensaje WhatsApp después de ${this.maxRetries} intentos: ${errorMessage}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    } catch (error) {
+      // Re-throw HttpExceptions as-is
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      // Handle unexpected errors
+      this.logger.error(
+        `Error inesperado en sendMessage: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+
+      throw new HttpException(
+        'Error interno del servidor al procesar mensaje WhatsApp',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  async sendTemplateMessage(
+    to: string,
+    templateName: string,
+  ): Promise<WhatsAppApiResponse> {
+    try {
+      // Validate inputs
+      this.validateMessageInput(to, templateName);
+
+      const body: WhatsAppMessageBody = {
+        messaging_product: 'whatsapp',
+        type: 'template',
+        to: to.replace(/\D/g, ''),
+        template: {
+          name: templateName,
+          language: {
+            code: 'en', // O "es" si la plantilla está en español
+          },
+        },
+      };
+
+      this.logger.log(
+        `Enviando mensaje de plantilla WhatsApp a : ${JSON.stringify(body)}`,
+      );
+
+      let lastError: Error | undefined;
 
       for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
         try {
