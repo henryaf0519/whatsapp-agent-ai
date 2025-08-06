@@ -581,7 +581,7 @@ export class AgentOpenIaService implements OnModuleInit {
       };
     }
     if (payload.type === 'button') {
-      const resp = this.validateMessagePayload(payload);
+      const resp = await this.validateMessagePayload(payload);
       userHistory += `AI: ${resp}\n`;
       return {
         type: 'texto',
@@ -665,26 +665,39 @@ export class AgentOpenIaService implements OnModuleInit {
     };
   }
 
-  private validateMessagePayload(payload: payLoad): string {
+  private async validateMessagePayload(payload: payLoad): Promise<string> {
     // Aquí implementas la lógica para manejar cada botón.
     // Puedes llamar a diferentes servicios o enviar plantillas.
     let agentResponse = '';
     switch (payload.action) {
-      case 'independiente_payload':
-        // Lógica para el botón "Independiente"
-        // Por ejemplo, enviar una nueva plantilla con las tarifas de independiente.
-        // agentResponse = await this.whatsappService.enviarPlantilla(userId, 'plantilla_tarifas_independiente');
-        agentResponse =
-          'Has seleccionado ser independiente. Te muestro las tarifas...';
-        break;
-      case 'dependiente_payload':
+      case 'Independiente': {
+        const hits = await this.searchPinecone('membershipPrices', [
+          'membershipPrices',
+        ]);
+
+        if (hits.length === 0) {
+          return 'No hay afiliaciones disponibles en este momento.';
+        }
+
+        const resultados = hits
+          .map((hit) => this.formatResult(hit.fields?.text ?? ''))
+          .filter((result) => result !== '• Información no disponible')
+          .join('\n');
+
+        return resultados
+          ? `Afiliaciones disponibles:\n${resultados}`
+          : 'No hay afiliaciones disponibles.';
+      }
+      case 'dependiente_payload': {
         // Lógica para el botón "Dependiente"
         agentResponse =
           'Has seleccionado ser dependiente. Te explico los pasos...';
         break;
-      default:
+      }
+      default: {
         agentResponse = 'Opción no reconocida. Por favor, intenta de nuevo.';
         break;
+      }
     }
     return agentResponse;
   }
