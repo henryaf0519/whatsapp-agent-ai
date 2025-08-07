@@ -22,6 +22,15 @@ interface AgentScheduleItem {
   [key: string]: any;
 }
 
+interface ConversationItem {
+  userId: string;
+  userHistory: string;
+  actions?: {
+    services?: string;
+    activityEconomic?: string;
+  };
+}
+
 @Injectable()
 export class DynamoService {
   private readonly dynamoClient: DynamoDBClient;
@@ -339,7 +348,9 @@ export class DynamoService {
     };
   }
 
-  async getConversationHistory(userId: string): Promise<string | undefined> {
+  async getConversationHistory(
+    userId: string,
+  ): Promise<ConversationItem | undefined> {
     const command = new GetCommand({
       TableName: 'ConversationHistory',
       Key: {
@@ -349,7 +360,7 @@ export class DynamoService {
 
     try {
       const result = await this.docClient.send(command);
-      return result.Item?.history;
+      return result.Item as ConversationItem;
     } catch (error) {
       console.error('Error getting conversation history from DynamoDB', error);
       return undefined;
@@ -359,12 +370,15 @@ export class DynamoService {
   async saveConversationHistory(
     userId: string,
     history: string,
+    actions?: { services?: string; activityEconomic?: string },
   ): Promise<void> {
     const command = new PutCommand({
       TableName: 'ConversationHistory',
       Item: {
         userId: userId,
-        history: history,
+        userHistory: history,
+        actions: actions || {},
+        timestamp: new Date().toISOString(),
       },
     });
 
@@ -390,6 +404,33 @@ export class DynamoService {
     } catch (error) {
       console.error('Error getting conversation history from DynamoDB', error);
       return undefined;
+    }
+  }
+
+  async findPrices(id: string, economicactivity: number) {
+    const command = new QueryCommand({
+      TableName: 'prices', // Replace with your actual table name
+      IndexName: 'id-economicActivity-index', // The name of your GSI
+      KeyConditionExpression: '#id = :id AND #ea = :ea',
+      ExpressionAttributeNames: {
+        '#id': 'id',
+        '#ea': 'economicActivity',
+      },
+      ExpressionAttributeValues: {
+        ':id': id,
+        ':ea': economicactivity, // The economic activity number you want to query
+      },
+    });
+
+    try {
+      const response = await this.docClient.send(command);
+
+      if (response.Items && response.Items.length > 0) {
+        return response.Items[0].value;
+      }
+      return '';
+    } catch (error) {
+      console.error('Error querying DynamoDB GSI:', error);
     }
   }
 }

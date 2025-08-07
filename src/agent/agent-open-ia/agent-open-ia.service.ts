@@ -17,15 +17,29 @@ interface PineconeSearchResult {
   fields?: { text?: string; tipo?: string };
 }
 interface payLoad {
-  type: 'text' | 'button' | 'unsupported';
+  type: 'text' | 'button' | 'plantilla' | 'unsupported';
   text?: string;
   action?: string;
+  template?: string;
+  actions?: {
+    services?: string;
+    activityEconomic?: string;
+  };
 }
 
 interface sendWhastappResponse {
   type: 'plantilla' | 'texto';
   template?: string;
   text?: string;
+}
+
+interface ConversationItem {
+  userId: string;
+  userHistory: string;
+  actions?: {
+    services?: string;
+    activityEconomic?: string;
+  };
 }
 @Injectable()
 export class AgentOpenIaService implements OnModuleInit {
@@ -116,6 +130,33 @@ export class AgentOpenIaService implements OnModuleInit {
           filter: { tipo: { $in: filterType } },
         },
         fields: ['text', 'tipo'],
+      });
+
+      return (response.result?.hits || []) as PineconeSearchResult[];
+    } catch (error) {
+      this.logger.error(`Error searching Pinecone for "${searchText}"`, error);
+      return [];
+    }
+  }
+
+  private async searchPineconeActions(
+    searchText: string,
+    filterType: string[],
+  ): Promise<PineconeSearchResult[]> {
+    try {
+      this.validateInput(searchText, 'searchText');
+
+      if (!Array.isArray(filterType) || filterType.length === 0) {
+        throw new Error('filterType debe ser un array no vacío');
+      }
+
+      const response = await this.pineconeNamespace.searchRecords({
+        query: {
+          topK: 8,
+          inputs: { text: searchText },
+          filter: { tipo: { $in: filterType } },
+        },
+        fields: ['search', 'tipo'],
       });
 
       return (response.result?.hits || []) as PineconeSearchResult[];
@@ -565,28 +606,50 @@ export class AgentOpenIaService implements OnModuleInit {
     userId: string,
     payload: payLoad,
   ): Promise<sendWhastappResponse> {
-    let userHistory =
+    const conversationData =
       (await this.dynamoService.getConversationHistory(userId)) || '';
+    let userHistory =
+      typeof conversationData === 'string' ? '' : conversationData.userHistory;
+    const actions =
+      typeof conversationData === 'string'
+        ? {}
+        : conversationData.actions || {};
     const currentUserMessage = `User: ${payload.text}`;
     if (userHistory === '') {
-      const genericMessage = `
-      ¡Hola! 👋 Bienvenido a Afiliamos. ¿En qué podemos ayudarte hoy?\n🚀 Quieres conocer nuestros servicios?\n💰 Precios de afiliación a seguridad social?\n💳 Pagar tu mensualidad? (para clientes frecuentes)`;
-      userHistory += currentUserMessage + '\n';
-      userHistory += `AI: ${genericMessage}\n`;
-      await this.dynamoService.saveConversationHistory(userId, userHistory);
+      userHistory += `AI: Hola Bienvenido a Afiliamos`;
+      await this.dynamoService.saveConversationHistory(
+        userId,
+        userHistory,
+        actions,
+      );
       return {
         type: 'plantilla',
-        template: 'activityeconomic',
+        template: 'bienvenida_inicial ',
         text: '',
       };
     }
     if (payload.type === 'button') {
-      const resp = await this.validateMessagePayload(payload);
-      userHistory += `AI: ${resp}\n`;
+      this.logger.log(
+        `Botón presionado por el usuario ${JSON.stringify(userHistory)}`,
+      );
+      const resp: payLoad = await this.validateMessagePayload(payload, actions);
+      let updatedActions = {};
+      if (resp.actions) {
+        updatedActions = { ...actions, ...resp.actions };
+      } else {
+        updatedActions = { ...actions };
+      }
+      userHistory += `User: ${payload.text}\n`;
+      userHistory += `AI: ${resp.template}\n`;
+      await this.dynamoService.saveConversationHistory(
+        userId,
+        userHistory,
+        updatedActions,
+      );
       return {
-        type: 'texto',
-        template: '',
-        text: resp,
+        type: resp.type === 'plantilla' ? 'plantilla' : 'texto',
+        template: resp.template ?? '',
+        text: resp.text ?? 'Opción no reconocida. Por favor, intenta de nuevo.',
       };
     }
     userHistory += currentUserMessage + '\n';
@@ -601,7 +664,11 @@ export class AgentOpenIaService implements OnModuleInit {
         );
         const cacheResponseForHistory = `AI: ${cachedResponse}\n`;
         userHistory += cacheResponseForHistory;
-        await this.dynamoService.saveConversationHistory(userId, userHistory);
+        await this.dynamoService.saveConversationHistory(
+          userId,
+          userHistory,
+          actions,
+        );
         return {
           type: 'texto',
           template: '',
@@ -665,40 +732,89 @@ export class AgentOpenIaService implements OnModuleInit {
     };
   }
 
-  private async validateMessagePayload(payload: payLoad): Promise<string> {
+  private async validateMessagePayload(
+    payload: payLoad,
+    actions: any,
+  ): Promise<payLoad> {
     // Aquí implementas la lógica para manejar cada botón.
     // Puedes llamar a diferentes servicios o enviar plantillas.
-    let agentResponse = '';
-    switch (payload.action) {
-      case 'Independiente': {
-        const hits = await this.searchPinecone('membershipPrices', [
-          'membershipPrices',
-        ]);
 
-        if (hits.length === 0) {
-          return 'No hay afiliaciones disponibles en este momento.';
+    switch (payload.action) {
+      case 'Independiente':
+        return {
+          type: 'plantilla',
+          template: 'servicioindependientes ',
+          text: '',
+          actions: {
+            services: 'Independientes',
+            activityEconomic: 'Independientes',
+          },
+        };
+      case 'Precios Seguridad Social': {
+        /*return {
+          type: 'plantilla',
+          template: 'economicactivity',
+          text: '',
+        };*/
+        return {
+          type: 'plantilla',
+          template: 'servicioindependientes',
+          text: '',
+          actions: {
+            services: 'Independientes',
+            activityEconomic: 'Independientes',
+          },
+        };
+      }
+      case 'Salud,Riesgo,Pensión':
+        if (actions.activityEconomic === 'Independientes') {
+          const resp = await this.dynamoService.findPrices(
+            'salud + riesgo + pension',
+            2,
+          );
+          return {
+            type: 'text',
+            template: '',
+            text: resp,
+          };
+        } else {
+          return {
+            type: 'plantilla',
+            template: 'serviciodependientes',
+            text: '',
+            actions: {
+              services: 'Seguridad Social',
+              activityEconomic: 'Dependientes',
+            },
+          };
         }
 
-        const resultados = hits
-          .map((hit) => this.formatResult(hit.fields?.text ?? ''))
-          .filter((result) => result !== '• Información no disponible')
-          .join('\n');
-
-        return resultados
-          ? `Afiliaciones disponibles:\n${resultados}`
-          : 'No hay afiliaciones disponibles.';
-      }
-      case 'dependiente_payload': {
-        // Lógica para el botón "Dependiente"
-        agentResponse =
-          'Has seleccionado ser dependiente. Te explico los pasos...';
-        break;
-      }
+      case 'Salud,Riesgo':
+        if (actions.activityEconomic === 'Independientes') {
+          const resp = await this.dynamoService.findPrices('salud + riesgo', 2);
+          return {
+            type: 'text',
+            template: '',
+            text: resp,
+          };
+        } else {
+          return {
+            type: 'plantilla',
+            template: 'serviciodependientes',
+            text: '',
+            actions: {
+              services: 'Seguridad Social',
+              activityEconomic: 'Dependientes',
+            },
+          };
+        }
       default: {
-        agentResponse = 'Opción no reconocida. Por favor, intenta de nuevo.';
-        break;
+        return {
+          type: 'text',
+          template: '',
+          text: 'Flujo no encontrado',
+        };
       }
     }
-    return agentResponse;
   }
 }
