@@ -640,7 +640,7 @@ export class AgentOpenIaService implements OnModuleInit {
         updatedActions = { ...actions };
       }
       userHistory += `User: ${payload.text}\n`;
-      userHistory += `AI: ${resp.template}\n`;
+      userHistory += `AI: ${resp.text}\n`;
       await this.dynamoService.saveConversationHistory(
         userId,
         userHistory,
@@ -743,33 +743,64 @@ export class AgentOpenIaService implements OnModuleInit {
       case 'Independiente':
         return {
           type: 'plantilla',
-          template: 'servicioindependientes ',
-          text: '',
+          template: 'servicioindependientes',
+          text: 'Mostrar servicios independientes',
           actions: {
             services: 'Independientes',
             activityEconomic: 'Independientes',
+          },
+        };
+
+      case 'Dependiente':
+        return {
+          type: 'plantilla',
+          template: 'serviciosdependientes',
+          text: 'Mostrar servicios dependientes',
+          actions: {
+            services: 'Dependiente',
+            activityEconomic: 'Dependiente',
           },
         };
       case 'Precios Seguridad Social': {
-        /*return {
-          type: 'plantilla',
-          template: 'economicactivity',
-          text: '',
-        };*/
         return {
           type: 'plantilla',
-          template: 'servicioindependientes',
-          text: '',
+          template: 'economicactivity',
+          text: 'Mostrar actividad económica',
           actions: {
-            services: 'Independientes',
-            activityEconomic: 'Independientes',
+            services: 'Seguridad Social',
+            activityEconomic: '',
           },
         };
       }
-      case 'Salud,Riesgo,Pensión':
+
+      case 'Salud': {
+        const resp = await this.dynamoService.findPrices(`salud1`, 1);
+        return {
+          type: 'text',
+          template: '',
+          text: resp,
+        };
+      }
+      case 'Salud,Riesgo':
+        if (actions.activityEconomic === 'Independientes') {
+          const resp = await this.dynamoService.findPrices(`salud,riesgo2`, 2);
+          return {
+            type: 'text',
+            template: '',
+            text: resp,
+          };
+        } else {
+          const resp = await this.dynamoService.findPrices(`salud,riesgo1`, 1);
+          return {
+            type: 'text',
+            template: '',
+            text: resp,
+          };
+        }
+      case 'Salud,Riesgo,Pension':
         if (actions.activityEconomic === 'Independientes') {
           const resp = await this.dynamoService.findPrices(
-            'salud + riesgo + pension',
+            `salud,riesgo,pension2`,
             2,
           );
           return {
@@ -778,36 +809,38 @@ export class AgentOpenIaService implements OnModuleInit {
             text: resp,
           };
         } else {
-          return {
-            type: 'plantilla',
-            template: 'serviciodependientes',
-            text: '',
-            actions: {
-              services: 'Seguridad Social',
-              activityEconomic: 'Dependientes',
-            },
-          };
-        }
-
-      case 'Salud,Riesgo':
-        if (actions.activityEconomic === 'Independientes') {
-          const resp = await this.dynamoService.findPrices('salud + riesgo', 2);
+          const resp = await this.dynamoService.findPrices(
+            `salud,riesgo,pension1`,
+            1,
+          );
           return {
             type: 'text',
             template: '',
             text: resp,
           };
-        } else {
-          return {
-            type: 'plantilla',
-            template: 'serviciodependientes',
-            text: '',
-            actions: {
-              services: 'Seguridad Social',
-              activityEconomic: 'Dependientes',
-            },
-          };
         }
+      case 'Salud,Riesgo,Caja': {
+        const resp = await this.dynamoService.findPrices(
+          `salud,riesgo,caja1`,
+          1,
+        );
+        return {
+          type: 'text',
+          template: '',
+          text: resp,
+        };
+      }
+      case 'Salud,Riesgo,Pension,Caja': {
+        const resp = await this.dynamoService.findPrices(
+          `salud,riesgo,pension,caja1`,
+          1,
+        );
+        return {
+          type: 'text',
+          template: '',
+          text: resp,
+        };
+      }
       default: {
         return {
           type: 'text',
