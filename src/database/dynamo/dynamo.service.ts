@@ -35,10 +35,8 @@ interface ConversationItem {
 export class DynamoService {
   private readonly dynamoClient: DynamoDBClient;
   private readonly docClient: DynamoDBDocumentClient;
-  constructor(
-    private config: ConfigService,
-    private readonly logger: Logger,
-  ) {
+  private readonly logger = new Logger(DynamoService.name);
+  constructor(private config: ConfigService) {
     this.dynamoClient = new DynamoDBClient({
       region: this.config.get<string>('AWS_REGION'),
     });
