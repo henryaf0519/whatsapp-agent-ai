@@ -29,6 +29,7 @@ interface ConversationItem {
     services?: string;
     activityEconomic?: string;
   };
+  timestamp: string;
 }
 
 @Injectable()

@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { DynamoService } from 'src/database/dynamo/dynamo.service';
 import { Pinecone } from '@pinecone-database/pinecone';
 import { SemanticCacheService } from 'src/semantic-cache/semantic-cache.service';
+import { StringPromptValue } from '@langchain/core/prompt_values';
 
 interface PineconeSearchResult {
   fields?: Record<string, string | undefined>;
@@ -572,7 +573,7 @@ export class AgentOpenIaService implements OnModuleInit {
   // Función para obtener el historial de la conversación del usuario
   async getConversationData(
     userId: string,
-  ): Promise<{ userHistory: string; actions: any }> {
+  ): Promise<{ userHistory: string; actions: any; timestamp: string }> {
     // Obtener los datos de la conversación desde DynamoDB
     const conversationData =
       await this.dynamoService.getConversationHistory(userId);
@@ -588,8 +589,13 @@ export class AgentOpenIaService implements OnModuleInit {
         ? conversationData.actions
         : {};
 
+    const timestamp =
+      conversationData && typeof conversationData !== 'string'
+        ? conversationData.timestamp
+        : '';
+
     // Retornamos el historial y las acciones
-    return { userHistory, actions };
+    return { userHistory, actions, timestamp };
   }
 
   async handleButtonAction(
@@ -753,18 +759,27 @@ export class AgentOpenIaService implements OnModuleInit {
     userId: string,
     payload: payLoad,
   ): Promise<sendWhastappResponse> {
-    const { userHistory, actions } = await this.getConversationData(userId);
+    const { userHistory, actions, timestamp } =
+      await this.getConversationData(userId);
+    const currentTime = new Date().getTime();
+    const lastMessageTime = userHistory ? new Date(timestamp).getTime() : 0;
+    const timeDifference = (currentTime - lastMessageTime) / 1000 / 60;
 
     const currentUserMessage = `User: ${payload.text}\n`;
     let updatedUserHistory = userHistory;
 
-    if (!userHistory) {
-      updatedUserHistory = `AI: Hola Bienvenido a Afiliamos\n`;
+    if (timeDifference > 5 || !userHistory) {
+      // Si han pasado más de 10 minutos o no hay historial, iniciar nueva conversación
+      const updatedUserHistory = `AI: Hola Bienvenido a Afiliamos\n`;
+
+      // Guardar el historial actualizado en la base de datos
       await this.dynamoService.saveConversationHistory(
         userId,
         updatedUserHistory,
         actions,
       );
+
+      // Retornar respuesta con plantilla de bienvenida
       return { type: 'plantilla', template: 'bienvenida_inicial', text: '' };
     }
 
