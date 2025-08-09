@@ -715,9 +715,6 @@ export class AgentOpenIaService implements OnModuleInit {
     payload: payLoad,
     actions: any,
   ): Promise<payLoad> {
-    // Aquí implementas la lógica para manejar cada botón.
-    // Puedes llamar a diferentes servicios o enviar plantillas.
-
     switch (payload.action) {
       case 'Independiente':
         return {
@@ -776,6 +773,7 @@ export class AgentOpenIaService implements OnModuleInit {
             text: resp,
           };
         }
+      case 'Salud,Riesgo,Pensión':
       case 'Salud,Riesgo,Pension':
         if (actions.activityEconomic === 'Independientes') {
           const resp = await this.dynamoService.findPrices(
