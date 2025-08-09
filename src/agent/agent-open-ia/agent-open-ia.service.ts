@@ -569,101 +569,145 @@ export class AgentOpenIaService implements OnModuleInit {
     }
   }
 
-  async hablar(
+  // Función para obtener el historial de la conversación del usuario
+  async getConversationData(
     userId: string,
-    payload: payLoad,
-  ): Promise<sendWhastappResponse> {
+  ): Promise<{ userHistory: string; actions: any }> {
+    // Obtener los datos de la conversación desde DynamoDB
     const conversationData =
       await this.dynamoService.getConversationHistory(userId);
+
+    // Si no hay datos, devolvemos valores predeterminados
     const userHistory =
       conversationData && typeof conversationData !== 'string'
         ? conversationData.userHistory
         : '';
+
     const actions =
       conversationData && typeof conversationData !== 'string'
         ? conversationData.actions
         : {};
 
-    const currentUserMessage = `User: ${payload.text}\n`;
-    let updatedUserHistory = userHistory;
+    // Retornamos el historial y las acciones
+    return { userHistory, actions };
+  }
 
-    if (!userHistory) {
-      updatedUserHistory = `AI: Hola Bienvenido a Afiliamos\n`;
-      await this.dynamoService.saveConversationHistory(
-        userId,
-        updatedUserHistory,
-        actions,
-      );
-      return { type: 'plantilla', template: 'bienvenida_inicial', text: '' };
+  async handleButtonAction(
+    payload: payLoad,
+    actions: any,
+    userHistory: string,
+    userId: string,
+  ): Promise<sendWhastappResponse | null> {
+    // Log de la acción del botón
+    this.logger.log(
+      `Botón presionado por el usuario: ${JSON.stringify(userHistory)}`,
+    );
+
+    // Validación de la respuesta del payload
+    const resp = await this.validateMessagePayload(payload, actions);
+
+    // Actualización de las acciones
+    const updatedActions = resp.actions
+      ? { ...actions, ...resp.actions }
+      : { ...actions };
+
+    // Actualización del historial de la conversación
+    const updatedUserHistory =
+      userHistory + `User: ${payload.text}\nAI: ${resp.text}\n`;
+
+    // Guardar el historial actualizado
+    await this.dynamoService.saveConversationHistory(
+      userId,
+      updatedUserHistory,
+      updatedActions,
+    );
+
+    // Verificar la acción del botón y devolver la respuesta adecuada
+    if (payload.action !== 'Pagar Mensualidad') {
+      return {
+        type: resp.type === 'plantilla' ? 'plantilla' : 'texto',
+        template: resp.template ?? '',
+        text: resp.text ?? 'Opción no reconocida. Por favor, intenta de nuevo.',
+      };
     }
 
-    // Manejo de acciones si el tipo es 'button'
-    if (payload.type === 'button') {
-      this.logger.log(
-        `Botón presionado por el usuario: ${JSON.stringify(userHistory)}`,
-      );
-      const resp = await this.validateMessagePayload(payload, actions);
-      const updatedActions = resp.actions
-        ? { ...actions, ...resp.actions }
-        : { ...actions };
+    // Si la acción es 'Pagar Mensualidad', no se devuelve nada aquí (dependiendo de tu flujo de negocio)
+    return null;
+  }
 
-      updatedUserHistory += currentUserMessage + `AI: ${resp.text}\n`;
-      await this.dynamoService.saveConversationHistory(
-        userId,
-        updatedUserHistory,
-        updatedActions,
-      );
-
-      if (payload.action !== 'Pagar Mensualidad') {
-        return {
-          type: resp.type === 'plantilla' ? 'plantilla' : 'texto',
-          template: resp.template ?? '',
-          text:
-            resp.text ?? 'Opción no reconocida. Por favor, intenta de nuevo.',
-        };
-      }
-    }
-
-    updatedUserHistory += currentUserMessage;
+  // Función para manejar la verificación de caché
+  async handleCacheCheck(
+    payload: payLoad,
+    userId: string,
+    updatedUserHistory: string,
+    actions: any,
+  ): Promise<sendWhastappResponse | null> {
+    // Verificar si el texto del payload tiene menos de 60 caracteres
     if (payload.text && payload.text.length <= 60) {
+      // Obtener la respuesta de la caché
       const cachedResponse = await this.semanticCacheService.getAgentResponse(
         payload.text,
       );
+
+      // Si hay respuesta en caché y no es una respuesta del LLM, la usamos
       if (cachedResponse && !cachedResponse.startsWith('[Respuesta del LLM]')) {
         this.logger.log(
           `[Cache Hit] Devolviendo respuesta de la caché para el usuario ${userId}`,
         );
+
+        // Actualizar el historial de la conversación con la respuesta en caché
         updatedUserHistory += `AI: ${cachedResponse}\n`;
+
+        // Guardar el historial actualizado en DynamoDB
         await this.dynamoService.saveConversationHistory(
           userId,
           updatedUserHistory,
           actions,
         );
+
+        // Retornar la respuesta desde la caché
         return { type: 'texto', template: '', text: cachedResponse };
       }
     }
 
+    // Si no se encuentra en caché o no hay texto en el payload, continuar con el flujo
+    return null;
+  }
+
+  // Función para procesar la respuesta del Orquestador
+  async processOrchestratorResponse(
+    updatedUserHistory: string,
+    currentUserMessage: string,
+    userId: string,
+    actions: any,
+  ): Promise<string> {
     let agentResponse = 'Lo siento, no pude procesar tu solicitud.';
     let finalAgentOutput = '';
 
     await withTrace('Orchestrator evaluator', async () => {
       try {
+        // Ejecutar el Orquestador
         const orchestratorResult = await run(
           this.orchestratorAgent,
           updatedUserHistory,
         );
+
+        // Registro de pasos intermedios del orquestador
         orchestratorResult.newItems.forEach((item) => {
           if (item.type === 'message_output_item' && item.content) {
             this.logger.debug(`  - paso: ${item.content}`);
           }
         });
 
+        // Obtener la respuesta final del orquestador
         finalAgentOutput = orchestratorResult.finalOutput;
         agentResponse = finalAgentOutput;
 
+        // Si el historial excede el tamaño máximo, sintetizarlo
         const MAX_HISTORY_LENGTH = 1000;
         if (updatedUserHistory.length > MAX_HISTORY_LENGTH) {
           try {
+            // Ejecutar el sintetizador para resumir la conversación
             const synthesizerResult = await run(
               this.synthesizerAgent,
               `${updatedUserHistory}\n\nPor favor, resume esta conversación de forma concisa, centrándote en las solicitudes del usuario, sus elecciones, precio y los datos que ha proporcionado. Omite saludos genéricos y detalles internos del asistente.`,
@@ -693,13 +737,7 @@ export class AgentOpenIaService implements OnModuleInit {
         finalAgentOutput = agentResponse;
         updatedUserHistory += `AI: ${agentResponse}\n`;
       } finally {
-        if (payload.text && payload.text.length <= 50) {
-          await this.semanticCacheService.trackAndCache(
-            payload.text,
-            agentResponse,
-          );
-        }
-
+        // Guardar el historial actualizado
         await this.dynamoService.saveConversationHistory(
           userId,
           updatedUserHistory,
@@ -707,6 +745,55 @@ export class AgentOpenIaService implements OnModuleInit {
         );
       }
     });
+
+    return agentResponse; // Devolver la respuesta final del agente
+  }
+
+  async hablar(
+    userId: string,
+    payload: payLoad,
+  ): Promise<sendWhastappResponse> {
+    const { userHistory, actions } = await this.getConversationData(userId);
+
+    const currentUserMessage = `User: ${payload.text}\n`;
+    let updatedUserHistory = userHistory;
+
+    if (!userHistory) {
+      updatedUserHistory = `AI: Hola Bienvenido a Afiliamos\n`;
+      await this.dynamoService.saveConversationHistory(
+        userId,
+        updatedUserHistory,
+        actions,
+      );
+      return { type: 'plantilla', template: 'bienvenida_inicial', text: '' };
+    }
+
+    if (payload.type === 'button') {
+      const buttonResponse = await this.handleButtonAction(
+        payload,
+        actions,
+        userHistory,
+        userId,
+      );
+      if (buttonResponse) return buttonResponse;
+    }
+
+    updatedUserHistory += currentUserMessage;
+
+    const cacheResponse = await this.handleCacheCheck(
+      payload,
+      userId,
+      updatedUserHistory,
+      actions,
+    );
+    if (cacheResponse) return cacheResponse;
+
+    const agentResponse = await this.processOrchestratorResponse(
+      updatedUserHistory,
+      currentUserMessage,
+      userId,
+      actions,
+    );
 
     return { type: 'texto', template: '', text: agentResponse };
   }
