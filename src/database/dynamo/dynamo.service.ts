@@ -69,15 +69,15 @@ export class DynamoService {
     }
   }
 
-  async generarSlots(
+  generarSlots(
     startHour: number,
     endHour: number,
     slotDuration: number,
     breakStart: number,
     breakEnd: number,
     fecha: string,
-  ) {
-    const slots = [] as string[];
+  ): string[] {
+    const slots: string[] = [];
 
     let current = moment
       .tz(fecha, 'America/Bogota')
@@ -167,7 +167,7 @@ export class DynamoService {
       fecha,
     );
     const ocupadas = await this.obtenerCitasOcupadas(psicologo.id, fecha);
-    return (await slots)
+    return slots
       .filter((slot) => !ocupadas.has(slot))
       .map((slot) => {
         const date = new Date(slot);
