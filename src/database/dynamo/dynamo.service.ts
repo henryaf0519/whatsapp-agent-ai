@@ -2,7 +2,7 @@
 
 /* eslint-disable @typescript-eslint/require-await */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -35,7 +35,10 @@ interface ConversationItem {
 export class DynamoService {
   private readonly dynamoClient: DynamoDBClient;
   private readonly docClient: DynamoDBDocumentClient;
-  constructor(private config: ConfigService) {
+  constructor(
+    private config: ConfigService,
+    private readonly logger: Logger,
+  ) {
     this.dynamoClient = new DynamoDBClient({
       region: this.config.get<string>('AWS_REGION'),
     });
@@ -65,7 +68,11 @@ export class DynamoService {
       if (Items && Items.length) return Items[0];
       throw new Error('Psicólogo no encontrado');
     } catch (error) {
-      console.error('Error consultando psicólogo:', error);
+      this.logger.error(
+        'Error consultando psicólogo:',
+        error,
+        'obtenerPsicologoPorNombre',
+      );
     }
   }
 
@@ -116,7 +123,7 @@ export class DynamoService {
         throw new Error('Horarios no encontrados para este psicólogo.');
       }
     } catch (error) {
-      console.error('Error obteniendo horarios:', error);
+      this.logger.error('Error obteniendo horarios:', error, 'obtenerHorarios');
     }
   }
 
@@ -144,7 +151,11 @@ export class DynamoService {
       const { Items } = await this.docClient.send(new QueryCommand(params));
       return new Set(Items?.map((c) => c.appointmentDateTime));
     } catch (error) {
-      console.error('Error obteniendo citas:', error);
+      this.logger.error(
+        'Error obteniendo citas:',
+        error,
+        'obtenerCitasOcupadas',
+      );
       return new Set();
     }
   }
@@ -207,7 +218,7 @@ export class DynamoService {
         return true;
       }
     } catch (error) {
-      console.error('Error al validar el hueco:', error);
+      this.logger.error('Error al validar el hueco:', error, 'huecoDisponible');
       return false;
     }
   }
@@ -235,7 +246,7 @@ export class DynamoService {
       );
       return { success: true, message: 'Cita creada con éxito', item };
     } catch (error) {
-      console.error('Error al crear la cita:', error);
+      this.logger.error('Error al crear la cita:', error, 'createAppointment');
       return { success: false, message: 'Error al crear la cita' };
     }
   }
@@ -274,7 +285,7 @@ export class DynamoService {
       );
       return { success: true, message: 'usuario creado con exito', item };
     } catch (error) {
-      console.error('Error al crear registro:', error);
+      this.logger.error('Error al crear registro:', error, 'createUser');
       return { success: false, message: 'Error al crear registro' };
     }
   }
@@ -362,7 +373,11 @@ export class DynamoService {
       const result = await this.docClient.send(command);
       return result.Item as ConversationItem;
     } catch (error) {
-      console.error('Error getting conversation history from DynamoDB', error);
+      this.logger.error(
+        'Error getting conversation history from DynamoDB',
+        error,
+        'getConversationHistory',
+      );
       return undefined;
     }
   }
@@ -385,7 +400,11 @@ export class DynamoService {
     try {
       await this.docClient.send(command);
     } catch (error) {
-      console.error('Error saving conversation history to DynamoDB', error);
+      this.logger.error(
+        'Error saving conversation history to DynamoDB',
+        error,
+        'saveConversationHistory',
+      );
     }
   }
 
@@ -399,10 +418,14 @@ export class DynamoService {
 
     try {
       const result = await this.docClient.send(command);
-      console.log('User found:', result);
+      this.logger.log(`User found: ${JSON.stringify(result)}`, 'findUser');
       return result.Item;
     } catch (error) {
-      console.error('Error getting conversation history from DynamoDB', error);
+      this.logger.error(
+        'Error getting conversation history from DynamoDB',
+        error,
+        'findUser',
+      );
       return undefined;
     }
   }
@@ -430,7 +453,7 @@ export class DynamoService {
       }
       return '';
     } catch (error) {
-      console.error('Error querying DynamoDB GSI:', error);
+      this.logger.error('Error querying DynamoDB GSI:', error, 'findPrices');
     }
   }
 
@@ -454,7 +477,7 @@ export class DynamoService {
       }
       return '';
     } catch (error) {
-      console.error('Error querying DynamoDB GSI:', error);
+      this.logger.error('Error querying DynamoDB GSI:', error, 'findPolicies');
     }
   }
 }
