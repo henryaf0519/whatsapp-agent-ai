@@ -161,10 +161,10 @@ export class AgentOpenIaService implements OnModuleInit {
   private initializeTools(): void {
     try {
       const self = this;
-      const independentPrices = tool({
-        name: 'independentPrices',
+      const dependentPrices = tool({
+        name: 'dependentPrices',
         description:
-          'Obtiene precios de afiliacionesa a seguridad social para personas independientes',
+          'Obtiene precios de afiliacionesa a seguridad social para personas dependientes',
         parameters: z.object({}),
         async execute(): Promise<string> {
           try {
@@ -193,13 +193,35 @@ export class AgentOpenIaService implements OnModuleInit {
         },
       });
 
-      const dependentPrices = tool({
-        name: 'dependentPrices',
+      const independentPrices = tool({
+        name: 'independentPrices',
         description:
-          'Obtiene precios de afiliacionesa a seguridad social para personas dependientes',
+          'Obtiene precios de afiliacionesa a seguridad social para personas independientes',
         parameters: z.object({}),
-        execute() {
-          return 'Salud : 50.000 | Pensión: 50.000 | Riesgos: 20.000 | Caja: 10.000';
+        async execute(): Promise<string> {
+          try {
+            const hits = await self.searchPinecone(
+              'independentPrices',
+              ['independentPrices'],
+              ['text', 'tipo'],
+            );
+
+            if (hits.length === 0) {
+              return 'No hay afiliaciones disponibles en este momento.';
+            }
+
+            const resultados = hits
+              .map((hit) => self.formatResult(hit.fields?.text ?? ''))
+              .filter((result) => result !== '• Información no disponible')
+              .join('\n');
+
+            return resultados
+              ? `Afiliaciones disponibles:\n${resultados}`
+              : 'No hay afiliaciones disponibles.';
+          } catch (error) {
+            self.logger.error('Error in membershipPrices tool', error);
+            return 'Error al obtener precios de afiliaciones. Intente nuevamente.';
+          }
         },
       });
 
@@ -239,8 +261,8 @@ export class AgentOpenIaService implements OnModuleInit {
         description: `Con esta tool le puedes decir al usuario si es independiente o dependiente`,
         parameters: z.object({}),
         execute() {
-          return `Dependientes:\nSe afilian como dependiente las personas que deseen por voluntad propia pagar su seguridad social, o que le exijan tener riesgos laborales\n
-           Indepentienes:\n se afilian como independientes las personas que tienen un contrato con el estado sea de la alcaldia-sena-gobernacion e.t.c o que tengan un contrato con una empresa y les exiga la planilla bajo su propio nombre, o que declaren renta`;
+          return `Dependientes:\n Las personas se afilian como dependientes si, por voluntad propia, desean pagar su seguridad social, o si su empleador les exige tener cobertura de riesgos laborales\n
+           Independientes:\n Las personas se afilian como independientes si tienen un contrato con el Estado (por ejemplo, con la Alcaldía, el SENA, la Gobernación, etc.), o si tienen un contrato con una empresa que les exige la planilla de seguridad social bajo su propio nombre. También pueden afiliarse como independientes aquellos que declaran renta.`;
         },
       });
 
@@ -503,7 +525,7 @@ export class AgentOpenIaService implements OnModuleInit {
 
       const users = new Agent({
         name: 'User Agent',
-        instructions: `Eres un experto en los servicios de Afiliamos.**Para hacer la conversación más amigable y moderna, utiliza emojis relevantes al final de tus respuestas.** Tu objetivo es buscar usuarios en base de datos. Pedir el numero de documento del cliente y buscarlo en base de datos. 1. Si el usuario no existe, informa que no se encontró ningún usuario con ese documento. 2. Si el usuario existe, Saludala amablemente llamando al usuario por su nombre y dile que un asesor se pondrá en contacto con él para finalizar la venta.`,
+        instructions: `Eres un experto en los servicios de Afiliamos.**Para hacer la conversación más amigable y moderna, utiliza emojis relevantes al final de tus respuestas.** Tu objetivo es buscar usuarios en base de datos. Pedir el numero de documento del cliente y buscarlo en base de datos. 1. Si el usuario no existe, informa que no se encontró ningún usuario con ese documento. 2. Si el usuario existe, Saludala amablemente llamando al usuario por su nombre, dile el precio que va a pagar y que un asesor se pondrá en contacto con él para finalizar la venta.`,
         model: this.MODEL_NAME,
         tools: [findUser],
       });
@@ -531,7 +553,7 @@ export class AgentOpenIaService implements OnModuleInit {
       const finishSale = new Agent({
         name: 'Finish Sale Agent',
         instructions:
-          'Eres un agente especializado en finalizar ventas de afiliaciones y pólizas. **Para hacer la conversación más amigable y moderna, utiliza emojis relevantes al final de tus respuestas.** cuando el usuario escoga el servicio que desea tomar  usa el formulario para recopilar datos del usuario y crear un nuevo usuario en la base de datos. Al crear el usuario, dile que un asesor se pondrá en contacto con él para finalizar la venta.',
+          'Eres un agente especializado en finalizar ventas de afiliaciones y pólizas. **Para hacer la conversación más amigable y moderna, utiliza emojis relevantes al final de tus respuestas.** cuando el usuario escoga el servicio que desea tomar envia el formulario y autocompleta si el ya te dio datos de ese formulario, despues cuando el usuario responda el formulario  crea un nuevo usuario en la base de datos. Al crear el usuario, muestrale el servicio que compro con su valor y  dile que un asesor se pondrá en contacto con él para finalizar la venta.',
         model: this.MODEL_NAME,
         tools: [form, createUser],
       });
