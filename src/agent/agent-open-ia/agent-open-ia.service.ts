@@ -535,7 +535,7 @@ export class AgentOpenIaService implements OnModuleInit {
 
       const users = new Agent({
         name: 'User Agent',
-        instructions: `Eres un experto en los servicios de Afiliamos.**Para hacer la conversación más amigable y moderna, utiliza emojis relevantes al final de tus respuestas.** Tu objetivo es buscar usuarios en base de datos. Pedir el numero de documento del cliente y buscarlo en base de datos. 1. Si el usuario no existe, informa que no se encontró ningún usuario con ese documento. 2. Si el usuario existe, llamalo por su nombre y dile que un asesor se pondrá en contacto con él para finalizar la venta. No lo saludes solo responde con el nombre del usuario y el mensaje.`,
+        instructions: `Eres un experto en los servicios de Afiliamos.**Para hacer la conversación más amigable y moderna, utiliza emojis relevantes al final de tus respuestas.** Tu objetivo es buscar usuarios en base de datos. Pedir el numero de documento del cliente y buscarlo en base de datos. 1. Si el usuario no existe, informa que no se encontró ningún usuario con ese documento. 2. Si el usuario existe, Saludala amablemente llamando al usuario por su nombre y dile que un asesor se pondrá en contacto con él para finalizar la venta.`,
         model: this.MODEL_NAME,
         tools: [findUser],
       });
@@ -646,11 +646,14 @@ export class AgentOpenIaService implements OnModuleInit {
         userHistory,
         updatedActions,
       );
-      return {
-        type: resp.type === 'plantilla' ? 'plantilla' : 'texto',
-        template: resp.template ?? '',
-        text: resp.text ?? 'Opción no reconocida. Por favor, intenta de nuevo.',
-      };
+      if (payload.action !== 'Pagar Mensualidad') {
+        return {
+          type: resp.type === 'plantilla' ? 'plantilla' : 'texto',
+          template: resp.template ?? '',
+          text:
+            resp.text ?? 'Opción no reconocida. Por favor, intenta de nuevo.',
+        };
+      }
     }
     userHistory += currentUserMessage + '\n';
     if (payload.text && payload.text.length <= 60) {
@@ -835,6 +838,14 @@ export class AgentOpenIaService implements OnModuleInit {
           `salud,riesgo,pension,caja1`,
           1,
         );
+        return {
+          type: 'text',
+          template: '',
+          text: resp,
+        };
+      }
+      case 'Polizas Incapacidad': {
+        const resp = await this.dynamoService.findPolicies(`poliza`);
         return {
           type: 'text',
           template: '',

@@ -407,7 +407,7 @@ export class DynamoService {
     }
   }
 
-  async findPrices(id: string, economicactivity: number) {
+  async findPrices(id: string, economicactivity?: number) {
     const command = new QueryCommand({
       TableName: 'prices', // Replace with your actual table name
       IndexName: 'id-economicActivity-index', // The name of your GSI
@@ -419,6 +419,30 @@ export class DynamoService {
       ExpressionAttributeValues: {
         ':id': id,
         ':ea': economicactivity, // The economic activity number you want to query
+      },
+    });
+
+    try {
+      const response = await this.docClient.send(command);
+
+      if (response.Items && response.Items.length > 0) {
+        return response.Items[0].value;
+      }
+      return '';
+    } catch (error) {
+      console.error('Error querying DynamoDB GSI:', error);
+    }
+  }
+
+  async findPolicies(id: string) {
+    const command = new QueryCommand({
+      TableName: 'prices', // Replace with your actual table name
+      KeyConditionExpression: '#id = :id',
+      ExpressionAttributeNames: {
+        '#id': 'id',
+      },
+      ExpressionAttributeValues: {
+        ':id': id, // The economic activity number you want to query
       },
     });
 
