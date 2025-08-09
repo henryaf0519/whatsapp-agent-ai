@@ -655,53 +655,65 @@ export class AgentOpenIaService implements OnModuleInit {
     let finalAgentOutput = '';
 
     await withTrace('Orchestrator evaluator', async () => {
-      const orchestratorResult = await run(
-        this.orchestratorAgent,
-        updatedUserHistory,
-      );
-      orchestratorResult.newItems.forEach((item) => {
-        if (item.type === 'message_output_item' && item.content) {
-          this.logger.debug(`  - paso: ${item.content}`);
+      try {
+        const orchestratorResult = await run(
+          this.orchestratorAgent,
+          updatedUserHistory,
+        );
+        orchestratorResult.newItems.forEach((item) => {
+          if (item.type === 'message_output_item' && item.content) {
+            this.logger.debug(`  - paso: ${item.content}`);
+          }
+        });
+
+        finalAgentOutput = orchestratorResult.finalOutput;
+        agentResponse = finalAgentOutput;
+
+        const MAX_HISTORY_LENGTH = 1000;
+        if (updatedUserHistory.length > MAX_HISTORY_LENGTH) {
+          try {
+            const synthesizerResult = await run(
+              this.synthesizerAgent,
+              `${updatedUserHistory}\n\nPor favor, resume esta conversación de forma concisa, centrándote en las solicitudes del usuario, sus elecciones, precio y los datos que ha proporcionado. Omite saludos genéricos y detalles internos del asistente.`,
+            );
+            const summarizedContent = synthesizerResult.finalOutput;
+            updatedUserHistory = `Resumen de la conversación anterior: ${summarizedContent}\n${currentUserMessage}AI: ${finalAgentOutput}\n`;
+            this.logger.log(
+              `Synthesized history updated for user ${userId}: ${updatedUserHistory}`,
+            );
+          } catch (error) {
+            this.logger.error(
+              `Failed to summarize conversation history for user ${userId}:`,
+              error,
+            );
+            updatedUserHistory += `AI: ${finalAgentOutput}\n`;
+          }
+        } else {
+          updatedUserHistory += `AI: ${finalAgentOutput}\n`;
         }
-      });
-
-      finalAgentOutput = orchestratorResult.finalOutput;
-      agentResponse = finalAgentOutput;
-
-      const MAX_HISTORY_LENGTH = 1000;
-      if (updatedUserHistory.length > MAX_HISTORY_LENGTH) {
-        try {
-          const synthesizerResult = await run(
-            this.synthesizerAgent,
-            `${updatedUserHistory}\n\nPor favor, resume esta conversación de forma concisa, centrándote en las solicitudes del usuario, sus elecciones, precio y los datos que ha proporcionado. Omite saludos genéricos y detalles internos del asistente.`,
-          );
-          const summarizedContent = synthesizerResult.finalOutput;
-          updatedUserHistory = `Resumen de la conversación anterior: ${summarizedContent}\n${currentUserMessage}AI: ${finalAgentOutput}\n`;
-          this.logger.log(
-            `Synthesized history updated for user ${userId}: ${updatedUserHistory}`,
-          );
-        } catch (error) {
-          this.logger.error(
-            `Failed to summarize conversation history for user ${userId}:`,
-            error,
+      } catch (error) {
+        this.logger.error(
+          `Failed to run orchestrator agent for user ${userId}:`,
+          error,
+        );
+        agentResponse =
+          'Lo siento, ha ocurrido un error al procesar tu solicitud. Inténtalo de nuevo más tarde.';
+        finalAgentOutput = agentResponse;
+        updatedUserHistory += `AI: ${agentResponse}\n`;
+      } finally {
+        if (payload.text && payload.text.length <= 50) {
+          await this.semanticCacheService.trackAndCache(
+            payload.text,
+            agentResponse,
           );
         }
-      } else {
-        updatedUserHistory += `AI: ${finalAgentOutput}\n`;
-      }
 
-      if (payload.text && payload.text.length <= 50) {
-        await this.semanticCacheService.trackAndCache(
-          payload.text,
-          agentResponse,
+        await this.dynamoService.saveConversationHistory(
+          userId,
+          updatedUserHistory,
+          actions,
         );
       }
-
-      await this.dynamoService.saveConversationHistory(
-        userId,
-        updatedUserHistory,
-        actions,
-      );
     });
 
     return { type: 'texto', template: '', text: agentResponse };
