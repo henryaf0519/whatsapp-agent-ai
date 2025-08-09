@@ -14,7 +14,7 @@ import { Pinecone } from '@pinecone-database/pinecone';
 import { SemanticCacheService } from 'src/semantic-cache/semantic-cache.service';
 
 interface PineconeSearchResult {
-  fields?: { text?: string; tipo?: string };
+  fields?: Record<string, string | undefined>;
 }
 interface payLoad {
   type: 'text' | 'button' | 'plantilla' | 'unsupported';
@@ -107,6 +107,7 @@ export class AgentOpenIaService implements OnModuleInit {
   private async searchPinecone(
     searchText: string,
     filterType: string[],
+    fields: string[],
   ): Promise<PineconeSearchResult[]> {
     try {
       this.validateInput(searchText, 'searchText');
@@ -115,31 +116,8 @@ export class AgentOpenIaService implements OnModuleInit {
         throw new Error('filterType debe ser un array no vacío');
       }
 
-      const response = await this.pineconeNamespace.searchRecords({
-        query: {
-          topK: 8,
-          inputs: { text: searchText },
-          filter: { tipo: { $in: filterType } },
-        },
-        fields: ['text', 'tipo'],
-      });
-
-      return (response.result?.hits || []) as PineconeSearchResult[];
-    } catch (error) {
-      this.logger.error(`Error searching Pinecone for "${searchText}"`, error);
-      return [];
-    }
-  }
-
-  private async searchPineconeActions(
-    searchText: string,
-    filterType: string[],
-  ): Promise<PineconeSearchResult[]> {
-    try {
-      this.validateInput(searchText, 'searchText');
-
-      if (!Array.isArray(filterType) || filterType.length === 0) {
-        throw new Error('filterType debe ser un array no vacío');
+      if (!Array.isArray(fields) || fields.length === 0) {
+        throw new Error('fields debe ser un array no vacío');
       }
 
       const response = await this.pineconeNamespace.searchRecords({
@@ -148,7 +126,7 @@ export class AgentOpenIaService implements OnModuleInit {
           inputs: { text: searchText },
           filter: { tipo: { $in: filterType } },
         },
-        fields: ['search', 'tipo'],
+        fields,
       });
 
       return (response.result?.hits || []) as PineconeSearchResult[];
@@ -189,9 +167,11 @@ export class AgentOpenIaService implements OnModuleInit {
         parameters: z.object({}),
         async execute(): Promise<string> {
           try {
-            const hits = await self.searchPinecone('membershipPrices', [
+            const hits = await self.searchPinecone(
               'membershipPrices',
-            ]);
+              ['membershipPrices'],
+              ['text', 'tipo'],
+            );
 
             if (hits.length === 0) {
               return 'No hay afiliaciones disponibles en este momento.';
@@ -228,9 +208,11 @@ export class AgentOpenIaService implements OnModuleInit {
         parameters: z.object({}),
         async execute(): Promise<string> {
           try {
-            const hits = await self.searchPinecone('policyPrices', [
+            const hits = await self.searchPinecone(
               'policyPrices',
-            ]);
+              ['policyPrices'],
+              ['text', 'tipo'],
+            );
 
             if (hits.length === 0) {
               return 'No hay pólizas disponibles en este momento.';
@@ -267,9 +249,11 @@ export class AgentOpenIaService implements OnModuleInit {
         parameters: z.object({}),
         async execute(): Promise<string> {
           try {
-            const hits = await self.searchPinecone('Que es afiliamos?', [
-              'descripcion',
-            ]);
+            const hits = await self.searchPinecone(
+              'Que es afiliamos?',
+              ['descripcion'],
+              ['text', 'tipo'],
+            );
 
             if (hits.length === 0) {
               return 'Información sobre Afiliamos no disponible en este momento.';
@@ -297,7 +281,11 @@ export class AgentOpenIaService implements OnModuleInit {
         parameters: z.object({}),
         async execute(): Promise<string> {
           try {
-            const hits = await self.searchPinecone('servicios', ['servicios']);
+            const hits = await self.searchPinecone(
+              'servicios',
+              ['servicios'],
+              ['text', 'tipo'],
+            );
 
             if (hits.length === 0) {
               return 'No hay servicios disponibles en este momento.';
@@ -325,7 +313,11 @@ export class AgentOpenIaService implements OnModuleInit {
         parameters: z.object({}),
         async execute(): Promise<string> {
           try {
-            const hits = await self.searchPinecone('Riesgos ARL', ['risk']);
+            const hits = await self.searchPinecone(
+              'Riesgos ARL',
+              ['risk'],
+              ['text', 'tipo'],
+            );
 
             if (hits.length === 0) {
               return 'Información sobre riesgos ARL no disponible.';
