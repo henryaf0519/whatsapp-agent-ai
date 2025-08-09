@@ -179,178 +179,221 @@ export class AgentOpenIaService implements OnModuleInit {
     }
   }
 
-  private initializeTools(): void {
+  private createIndependentPricesTool() {
     try {
-      const self = this;
-      const independentPrices = tool({
+      return tool({
         name: 'independentPrices',
         description:
           'Obtiene precios de afiliacionesa a seguridad social para personas independientes',
         parameters: z.object({}),
-        async execute(): Promise<string> {
+        execute: async (): Promise<string> => {
           try {
-            const hits = await self.searchPinecone('membershipPrices', [
+            const hits = await this.searchPinecone('membershipPrices', [
               'membershipPrices',
             ]);
-
             if (hits.length === 0) {
               return 'No hay afiliaciones disponibles en este momento.';
             }
-
             const resultados = hits
-              .map((hit) => self.formatResult(hit.fields?.text ?? ''))
+              .map((hit) => this.formatResult(hit.fields?.text ?? ''))
               .filter((result) => result !== '• Información no disponible')
               .join('\n');
-
             return resultados
               ? `Afiliaciones disponibles:\n${resultados}`
               : 'No hay afiliaciones disponibles.';
           } catch (error) {
-            self.logger.error('Error in membershipPrices tool', error);
+            this.logger.error('Error in membershipPrices tool', error);
             return 'Error al obtener precios de afiliaciones. Intente nuevamente.';
           }
         },
       });
+    } catch (error) {
+      this.logger.error('Error creating independentPrices tool', error);
+      throw error;
+    }
+  }
 
-      const dependentPrices = tool({
+  private createDependentPricesTool() {
+    try {
+      return tool({
         name: 'dependentPrices',
         description:
           'Obtiene precios de afiliacionesa a seguridad social para personas dependientes',
         parameters: z.object({}),
-        execute() {
-          return 'Salud : 50.000 | Pensión: 50.000 | Riesgos: 20.000 | Caja: 10.000';
+        execute: async (): Promise<string> => {
+          try {
+            return 'Salud : 50.000 | Pensión: 50.000 | Riesgos: 20.000 | Caja: 10.000';
+          } catch (error) {
+            this.logger.error('Error in dependentPrices tool', error);
+            return 'Error al obtener precios de afiliaciones dependientes. Intente nuevamente.';
+          }
         },
       });
+    } catch (error) {
+      this.logger.error('Error creating dependentPrices tool', error);
+      throw error;
+    }
+  }
 
-      const policyPrices = tool({
+  private createPolicyPricesTool() {
+    try {
+      return tool({
         name: 'policyPrices',
         description: 'Obtiene precios de pólizas disponibles',
         parameters: z.object({}),
-        async execute(): Promise<string> {
+        execute: async (): Promise<string> => {
           try {
-            const hits = await self.searchPinecone('policyPrices', [
+            const hits = await this.searchPinecone('policyPrices', [
               'policyPrices',
             ]);
-
             if (hits.length === 0) {
               return 'No hay pólizas disponibles en este momento.';
             }
-
             const resultados = hits
-              .map((hit) => self.formatResult(hit.fields?.text ?? ''))
+              .map((hit) => this.formatResult(hit.fields?.text ?? ''))
               .filter((result) => result !== '• Información no disponible')
               .join('\n');
-
             return resultados
               ? `Pólizas disponibles:\n${resultados}`
               : 'No hay pólizas disponibles.';
           } catch (error) {
-            self.logger.error('Error in policyPrices tool', error);
+            this.logger.error('Error in policyPrices tool', error);
             return 'Error al obtener precios de pólizas. Intente nuevamente.';
           }
         },
       });
+    } catch (error) {
+      this.logger.error('Error creating policyPrices tool', error);
+      throw error;
+    }
+  }
 
-      const activityEconomic = tool({
+  private createActivityEconomicTool() {
+    try {
+      return tool({
         name: 'activityEconomic',
-        description: `Con esta tool le puedes decir al usuario si es independiente o dependiente`,
+        description:
+          `Con esta tool le puedes decir al usuario si es independiente o dependiente`,
         parameters: z.object({}),
-        execute() {
-          return `Dependientes:\nSe afilian como dependiente las personas que deseen por voluntad propia pagar su seguridad social, o que le exijan tener riesgos laborales\n
-           Indepentienes:\n se afilian como independientes las personas que tienen un contrato con el estado sea de la alcaldia-sena-gobernacion e.t.c o que tengan un contrato con una empresa y les exiga la planilla bajo su propio nombre, o que declaren renta`;
+        execute: async (): Promise<string> => {
+          try {
+            return `Dependientes:\nSe afilian como dependiente las personas que deseen por voluntad propia pagar su seguridad social, o que le exijan tener riesgos laborales\n           Indepentienes:\n se afilian como independientes las personas que tienen un contrato con el estado sea de la alcaldia-sena-gobernacion e.t.c o que tengan un contrato con una empresa y les exiga la planilla bajo su propio nombre, o que declaren renta`;
+          } catch (error) {
+            this.logger.error('Error in activityEconomic tool', error);
+            return 'Error al obtener información sobre actividad económica.';
+          }
         },
       });
+    } catch (error) {
+      this.logger.error('Error creating activityEconomic tool', error);
+      throw error;
+    }
+  }
 
-      const about = tool({
+  private createAboutTool() {
+    try {
+      return tool({
         name: 'aboutAfiliamos',
         description: 'Informacion sobre la empresa Afiliamos',
         parameters: z.object({}),
-        async execute(): Promise<string> {
+        execute: async (): Promise<string> => {
           try {
-            const hits = await self.searchPinecone('Que es afiliamos?', [
+            const hits = await this.searchPinecone('Que es afiliamos?', [
               'descripcion',
             ]);
-
             if (hits.length === 0) {
               return 'Información sobre Afiliamos no disponible en este momento.';
             }
-
             const resultados = hits
               .map((hit) => `• ${hit.fields?.text ?? 'Sin información'}`)
               .filter((result) => result !== '• Sin información')
               .join('\n');
-
             return resultados
               ? `Sobre Afiliamos:\n${resultados}`
               : 'Información no disponible.';
           } catch (error) {
-            self.logger.error('Error in about tool', error);
+            this.logger.error('Error in about tool', error);
             return 'Error al obtener información sobre Afiliamos.';
           }
         },
       });
+    } catch (error) {
+      this.logger.error('Error creating about tool', error);
+      throw error;
+    }
+  }
 
-      const services = tool({
+  private createServicesTool() {
+    try {
+      return tool({
         name: 'servicesAfiliamos',
         description:
           'Busca y devuelve la información de los servicios de Afiliamos. Usa esta herramienta para responder a preguntas como "¿Qué servicios ofrecen?", "¿Dime los productos que tienen?" o "Quiero saber más sobre sus opciones".',
         parameters: z.object({}),
-        async execute(): Promise<string> {
+        execute: async (): Promise<string> => {
           try {
-            const hits = await self.searchPinecone('servicios', ['servicios']);
-
+            const hits = await this.searchPinecone('servicios', ['servicios']);
             if (hits.length === 0) {
               return 'No hay servicios disponibles en este momento.';
             }
-
             const resultados = hits
               .map((hit) => `• ${hit.fields?.text ?? 'Sin información'}`)
               .filter((result) => result !== '• Sin información')
               .join('\n');
-
             return resultados
               ? `Servicios:\n${resultados}`
               : 'Servicios no disponibles.';
           } catch (error) {
-            self.logger.error('Error in services tool', error);
+            this.logger.error('Error in services tool', error);
             return 'Error al obtener servicios disponibles.';
           }
         },
       });
+    } catch (error) {
+      this.logger.error('Error creating services tool', error);
+      throw error;
+    }
+  }
 
-      const risks = tool({
+  private createRisksTool() {
+    try {
+      return tool({
         name: 'risks',
         description:
           'Proporciona la lista de los niveles de riesgo de ARL y sus características. No uses esta herramienta para calcular el nivel de riesgo de un usuario, solo para mostrar la tabla de clasificación. Usa esta herramienta cuando el usuario pregunte por "riesgo", "niveles" de ARL o "clasificación".',
         parameters: z.object({}),
-        async execute(): Promise<string> {
+        execute: async (): Promise<string> => {
           try {
-            const hits = await self.searchPinecone('Riesgos ARL', ['risk']);
-
+            const hits = await this.searchPinecone('Riesgos ARL', ['risk']);
             if (hits.length === 0) {
               return 'Información sobre riesgos ARL no disponible.';
             }
-
             const resultados = hits
               .map((hit) => `• ${hit.fields?.text ?? 'Sin información'}`)
               .filter((result) => result !== '• Sin información')
               .join('\n');
-
             return resultados
               ? `Riesgos ARL:\n${resultados}`
               : 'Información sobre riesgos no disponible.';
           } catch (error) {
-            self.logger.error('Error in risks tool', error);
+            this.logger.error('Error in risks tool', error);
             return 'Error al obtener información sobre riesgos ARL.';
           }
         },
       });
+    } catch (error) {
+      this.logger.error('Error creating risks tool', error);
+      throw error;
+    }
+  }
 
-      const form = tool({
+  private createFormTool() {
+    try {
+      return tool({
         name: 'form',
         description: 'Formulario requerido para afiliación',
         parameters: z.object({}),
-        execute(): Promise<string> {
+        execute: async (): Promise<string> => {
           try {
             const formFields = [
               'NOMBRE COMPLETO:',
@@ -364,21 +407,23 @@ export class AgentOpenIaService implements OnModuleInit {
               'CELULAR:',
               'DIRECCION:',
             ];
-
             const formattedForm = formFields.join('\n');
-            return Promise.resolve(
-              `Formulario de afiliación:\n${formattedForm}`,
-            );
+            return `Formulario de afiliación:\n${formattedForm}`;
           } catch (error) {
-            self.logger.error('Error in form tool', error);
-            return Promise.resolve(
-              'Error al obtener formulario de afiliación.',
-            );
+            this.logger.error('Error in form tool', error);
+            return 'Error al obtener formulario de afiliación.';
           }
         },
       });
+    } catch (error) {
+      this.logger.error('Error creating form tool', error);
+      throw error;
+    }
+  }
 
-      const createUser = tool({
+  private createCreateUserTool() {
+    try {
+      return tool({
         name: 'createUser',
         description: 'Crea usuario con datos del formulario',
         parameters: z.object({
@@ -394,7 +439,7 @@ export class AgentOpenIaService implements OnModuleInit {
           address: z.string().min(1, 'Dirección es requerida'),
           service: z.string().min(1, 'Servicio es requerido'),
         }),
-        async execute({
+        execute: async ({
           name,
           doc,
           ips,
@@ -406,9 +451,8 @@ export class AgentOpenIaService implements OnModuleInit {
           phone,
           address,
           service,
-        }): Promise<string> {
+        }): Promise<string> => {
           try {
-            // Validación de entrada
             const requiredFields = {
               name: 'Nombre',
               doc: 'Documento',
@@ -421,7 +465,7 @@ export class AgentOpenIaService implements OnModuleInit {
               phone: 'Teléfono',
               address: 'Dirección',
               service: 'Servicio',
-            };
+            } as Record<string, string>;
 
             const params = {
               name,
@@ -435,15 +479,15 @@ export class AgentOpenIaService implements OnModuleInit {
               phone,
               address,
               service,
-            };
+            } as Record<string, string>;
 
             for (const [field, label] of Object.entries(requiredFields)) {
-              self.validateInput(params[field], label);
+              this.validateInput(params[field], label);
             }
 
-            self.logger.log(`Creating user: ${name}, Doc: ${doc}`);
+            this.logger.log(`Creating user: ${name}, Doc: ${doc}`);
 
-            const result = await self.dynamoService.crearUsuario(
+            const result = await this.dynamoService.crearUsuario(
               name,
               doc,
               ips,
@@ -463,34 +507,41 @@ export class AgentOpenIaService implements OnModuleInit {
               );
             }
 
-            self.logger.log(`User created successfully: ${name}`);
+            this.logger.log(`User created successfully: ${name}`);
             return `✅ Usuario ${name} creado exitosamente`;
           } catch (error: unknown) {
             const errorMessage =
               error instanceof Error ? error.message : 'Error inesperado';
-            self.logger.error(`Error creating user: ${errorMessage}`, error);
+            this.logger.error(`Error creating user: ${errorMessage}`, error);
             return `❌ Error al crear usuario: ${errorMessage}`;
           }
         },
       });
+    } catch (error) {
+      this.logger.error('Error creating createUser tool', error);
+      throw error;
+    }
+  }
 
-      const findUser = tool({
+  private createFindUserTool() {
+    try {
+      return tool({
         name: 'findUser',
         description: 'Busca un usuario por número de documento',
         parameters: z.object({
           doc: z.string().min(1, 'Documento es requerido'),
         }),
-        async execute({ doc }): Promise<string | object> {
+        execute: async ({ doc }): Promise<string | object> => {
           try {
-            self.validateInput(doc, 'Documento');
-            self.logger.log(`Buscando usuario con documento: ${doc}`);
-            const user = await self.dynamoService.findUser(doc);
+            this.validateInput(doc, 'Documento');
+            this.logger.log(`Buscando usuario con documento: ${doc}`);
+            const user = await this.dynamoService.findUser(doc);
             if (!user) {
               return {
                 error: `❌ No se encontró ningún usuario con el documento ${doc}`,
               };
             }
-            self.logger.log(`Usuario encontrado: ${user.nombre}`);
+            this.logger.log(`Usuario encontrado: ${user.nombre}`);
             return {
               nombre: user.nombre,
               identificacion: user.identificacion,
@@ -499,7 +550,7 @@ export class AgentOpenIaService implements OnModuleInit {
           } catch (error: unknown) {
             const errorMessage =
               error instanceof Error ? error.message : 'Error inesperado';
-            self.logger.error(
+            this.logger.error(
               `Error al buscar el usuario: ${errorMessage}`,
               error,
             );
@@ -507,6 +558,24 @@ export class AgentOpenIaService implements OnModuleInit {
           }
         },
       });
+    } catch (error) {
+      this.logger.error('Error creating findUser tool', error);
+      throw error;
+    }
+  }
+
+  private initializeTools(): void {
+    try {
+      const independentPrices = this.createIndependentPricesTool();
+      const dependentPrices = this.createDependentPricesTool();
+      const policyPrices = this.createPolicyPricesTool();
+      const activityEconomic = this.createActivityEconomicTool();
+      const about = this.createAboutTool();
+      const services = this.createServicesTool();
+      const risks = this.createRisksTool();
+      const form = this.createFormTool();
+      const createUser = this.createCreateUserTool();
+      const findUser = this.createFindUserTool();
 
       const users = new Agent({
         name: 'User Agent',
