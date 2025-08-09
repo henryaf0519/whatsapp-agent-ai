@@ -1,7 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-return */
-
-/* eslint-disable @typescript-eslint/require-await */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable } from '@nestjs/common';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { ConfigService } from '@nestjs/config';
@@ -19,7 +15,7 @@ import { normalizeString } from '../../utils/utils';
 interface AgentScheduleItem {
   id: string;
   timestamp: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 interface ConversationItem {
@@ -29,6 +25,23 @@ interface ConversationItem {
     services?: string;
     activityEconomic?: string;
   };
+}
+
+interface Psychologist {
+  psychologistId: string;
+  id: string;
+  email: string;
+  [key: string]: unknown;
+}
+
+interface WorkingHours {
+  startHour: number;
+  endHour: number;
+  slotDuration: number;
+  breakStart: number;
+  breakEnd: number;
+  psychologistId: string;
+  [key: string]: unknown;
 }
 
 @Injectable()
@@ -42,7 +55,9 @@ export class DynamoService {
     this.docClient = DynamoDBDocumentClient.from(this.dynamoClient);
   }
 
-  async guardarDato(payload: Record<string, any>): Promise<AgentScheduleItem> {
+  async guardarDato(
+    payload: Record<string, unknown>,
+  ): Promise<AgentScheduleItem> {
     const item: AgentScheduleItem = {
       id: uuidv4(),
       timestamp: new Date().toISOString(),
@@ -54,7 +69,9 @@ export class DynamoService {
     return item;
   }
 
-  async obtenerPsicologoPorNombre(nombre) {
+  async obtenerPsicologoPorNombre(
+    nombre: string,
+  ): Promise<Psychologist | undefined> {
     const params = {
       TableName: 'Psychologists',
       FilterExpression: 'contains(nombre, :nombre)',
@@ -62,22 +79,24 @@ export class DynamoService {
     };
     try {
       const { Items } = await this.docClient.send(new ScanCommand(params));
-      if (Items && Items.length) return Items[0];
+      const psychologists = Items as Psychologist[] | undefined;
+      if (psychologists && psychologists.length) return psychologists[0];
       throw new Error('Psicólogo no encontrado');
     } catch (error) {
       console.error('Error consultando psicólogo:', error);
+      return undefined;
     }
   }
 
-  async generarSlots(
+  generarSlots(
     startHour: number,
     endHour: number,
     slotDuration: number,
     breakStart: number,
     breakEnd: number,
     fecha: string,
-  ) {
-    const slots = [] as string[];
+  ): string[] {
+    const slots: string[] = [];
 
     let current = moment
       .tz(fecha, 'America/Bogota')
@@ -101,7 +120,9 @@ export class DynamoService {
     return slots;
   }
 
-  async obtenerHorarios(psychologistId) {
+  async obtenerHorarios(
+    psychologistId: string,
+  ): Promise<WorkingHours | undefined> {
     const params = {
       TableName: 'WorkingHours',
       IndexName: 'psychologistId-index',
@@ -110,17 +131,22 @@ export class DynamoService {
     };
     try {
       const { Items } = await this.docClient.send(new QueryCommand(params));
-      if (Items && Items.length > 0) {
-        return Items[0];
+      const workingHours = Items as WorkingHours[] | undefined;
+      if (workingHours && workingHours.length > 0) {
+        return workingHours[0];
       } else {
         throw new Error('Horarios no encontrados para este psicólogo.');
       }
     } catch (error) {
       console.error('Error obteniendo horarios:', error);
+      return undefined;
     }
   }
 
-  async obtenerCitasOcupadas(psychologistId, fecha) {
+  async obtenerCitasOcupadas(
+    psychologistId: string,
+    fecha: string,
+  ): Promise<Set<string>> {
     const dayStart = moment
       .tz(fecha, 'America/Bogota')
       .startOf('day')
@@ -142,14 +168,20 @@ export class DynamoService {
     };
     try {
       const { Items } = await this.docClient.send(new QueryCommand(params));
-      return new Set(Items?.map((c) => c.appointmentDateTime));
+      const appointments = (
+        Items as { appointmentDateTime: string }[] | undefined
+      )?.map((c) => c.appointmentDateTime);
+      return new Set(appointments);
     } catch (error) {
       console.error('Error obteniendo citas:', error);
       return new Set();
     }
   }
 
-  async obtenerHuecosDisponibles(name: string, fecha) {
+  async obtenerHuecosDisponibles(
+    name: string,
+    fecha: string,
+  ): Promise<string | string[]> {
     const psicologo = await this.obtenerPsicologoPorNombre(
       normalizeString(name),
     );
@@ -167,7 +199,7 @@ export class DynamoService {
       fecha,
     );
     const ocupadas = await this.obtenerCitasOcupadas(psicologo.id, fecha);
-    return (await slots)
+    return slots
       .filter((slot) => !ocupadas.has(slot))
       .map((slot) => {
         const date = new Date(slot);
@@ -179,7 +211,11 @@ export class DynamoService {
       .join(', ');
   }
 
-  async huecoDisponible(date, hour, psychologistId) {
+  async huecoDisponible(
+    date: string,
+    hour: string,
+    psychologistId: string,
+  ): Promise<boolean> {
     if (hour.length === 4) hour = `0${hour}`;
 
     const local = moment.tz(
@@ -201,7 +237,8 @@ export class DynamoService {
     };
     try {
       const { Items } = await this.docClient.send(new QueryCommand(params));
-      if (Items && Items.length > 0) {
+      const citas = Items as unknown[] | undefined;
+      if (citas && citas.length > 0) {
         return false;
       } else {
         return true;
@@ -212,7 +249,12 @@ export class DynamoService {
     }
   }
 
-  async createAppointment(date, hour, psychologistId, email) {
+  async createAppointment(
+    date: string,
+    hour: string,
+    psychologistId: string,
+    email: string,
+  ) {
     if (hour.length === 4) hour = `0${hour}`;
     const local = moment.tz(
       `${date}T${hour}:00`,
@@ -241,17 +283,17 @@ export class DynamoService {
   }
 
   async createUser(
-    name,
-    doc,
-    ips,
-    date,
-    eps,
-    pension,
-    box,
-    risk,
-    phone,
-    address,
-    service,
+    name: string,
+    doc: string,
+    ips: string,
+    date: string,
+    eps: string,
+    pension: string,
+    box: string,
+    risk: string,
+    phone: string,
+    address: string,
+    service: string,
   ) {
     const item = {
       id: uuidv4(),
@@ -279,7 +321,7 @@ export class DynamoService {
     }
   }
 
-  async crearCita(date, hour, name, email) {
+  async crearCita(date: string, hour: string, name: string, email: string) {
     const psicologo = await this.obtenerPsicologoPorNombre(
       normalizeString(name),
     );
@@ -311,17 +353,17 @@ export class DynamoService {
   }
 
   async crearUsuario(
-    name,
-    doc,
-    ips,
-    date,
-    eps,
-    pension,
-    box,
-    risk,
-    phone,
-    address,
-    service,
+    name: string,
+    doc: string,
+    ips: string,
+    date: string,
+    eps: string,
+    pension: string,
+    box: string,
+    risk: string,
+    phone: string,
+    address: string,
+    service: string,
   ) {
     const resp = await this.createUser(
       name,
@@ -389,7 +431,7 @@ export class DynamoService {
     }
   }
 
-  async findUser(doc) {
+  async findUser(doc: string): Promise<Record<string, unknown> | undefined> {
     const command = new GetCommand({
       TableName: 'users_monthly',
       Key: {
@@ -400,7 +442,7 @@ export class DynamoService {
     try {
       const result = await this.docClient.send(command);
       console.log('User found:', result);
-      return result.Item;
+      return result.Item as Record<string, unknown>;
     } catch (error) {
       console.error('Error getting conversation history from DynamoDB', error);
       return undefined;
@@ -424,9 +466,9 @@ export class DynamoService {
 
     try {
       const response = await this.docClient.send(command);
-
-      if (response.Items && response.Items.length > 0) {
-        return response.Items[0].value;
+      const items = response.Items as { value: string }[] | undefined;
+      if (items && items.length > 0) {
+        return items[0].value;
       }
       return '';
     } catch (error) {
@@ -448,9 +490,9 @@ export class DynamoService {
 
     try {
       const response = await this.docClient.send(command);
-
-      if (response.Items && response.Items.length > 0) {
-        return response.Items[0].value;
+      const items = response.Items as { value: string }[] | undefined;
+      if (items && items.length > 0) {
+        return items[0].value;
       }
       return '';
     } catch (error) {
