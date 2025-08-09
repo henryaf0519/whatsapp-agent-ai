@@ -33,14 +33,6 @@ interface sendWhastappResponse {
   text?: string;
 }
 
-interface ConversationItem {
-  userId: string;
-  userHistory: string;
-  actions?: {
-    services?: string;
-    activityEconomic?: string;
-  };
-}
 @Injectable()
 export class AgentOpenIaService implements OnModuleInit {
   private readonly logger = new Logger(AgentOpenIaService.name);
@@ -489,35 +481,16 @@ export class AgentOpenIaService implements OnModuleInit {
           doc: z.string().min(1, 'Documento es requerido'),
         }),
         async execute({ doc }): Promise<string | object> {
-          // Cambia el tipo de retorno para incluir un objeto
           try {
-            // ... (parte de validación de entrada, que parece ser un patrón de tu código)
-            const requiredFields = {
-              doc: 'Documento',
-            };
-
-            const params = {
-              doc,
-            };
-
-            for (const [field, label] of Object.entries(requiredFields)) {
-              // Asumiendo que `self.validateInput` es un método que valida los campos
-              self.validateInput(params[field], label);
-            }
-
-            self.logger.log(`Find user Doc: ${doc}`);
-
-            // Utiliza el método de servicio para buscar el usuario por documento
+            self.validateInput(doc, 'Documento');
+            self.logger.log(`Buscando usuario con documento: ${doc}`);
             const user = await self.dynamoService.findUser(doc);
-
             if (!user) {
-              // Si no se encuentra el usuario, se lanza un error
-              return `❌ No se encontró ningún usuario con el documento ${doc}`;
+              return {
+                error: `❌ No se encontró ningún usuario con el documento ${doc}`,
+              };
             }
-
-            self.logger.log(`User found successfully: ${user.nombre}`);
-
-            // Retorna un objeto con los campos solicitados
+            self.logger.log(`Usuario encontrado: ${user.nombre}`);
             return {
               nombre: user.nombre,
               identificacion: user.identificacion,
@@ -526,8 +499,10 @@ export class AgentOpenIaService implements OnModuleInit {
           } catch (error: unknown) {
             const errorMessage =
               error instanceof Error ? error.message : 'Error inesperado';
-            self.logger.error(`Error finding user: ${errorMessage}`, error);
-            // Retorna un objeto de error para que sea fácil de manejar en el código cliente
+            self.logger.error(
+              `Error al buscar el usuario: ${errorMessage}`,
+              error,
+            );
             return { error: `❌ Error al buscar usuario: ${errorMessage}` };
           }
         },
@@ -607,45 +582,46 @@ export class AgentOpenIaService implements OnModuleInit {
     payload: payLoad,
   ): Promise<sendWhastappResponse> {
     const conversationData =
-      (await this.dynamoService.getConversationHistory(userId)) || '';
-    let userHistory =
-      typeof conversationData === 'string' ? '' : conversationData.userHistory;
+      await this.dynamoService.getConversationHistory(userId);
+    const userHistory =
+      conversationData && typeof conversationData !== 'string'
+        ? conversationData.userHistory
+        : '';
     const actions =
-      typeof conversationData === 'string'
-        ? {}
-        : conversationData.actions || {};
-    const currentUserMessage = `User: ${payload.text}`;
-    if (userHistory === '') {
-      userHistory += `AI: Hola Bienvenido a Afiliamos`;
+      conversationData && typeof conversationData !== 'string'
+        ? conversationData.actions
+        : {};
+
+    const currentUserMessage = `User: ${payload.text}\n`;
+    let updatedUserHistory = userHistory;
+
+    if (!userHistory) {
+      updatedUserHistory = `AI: Hola Bienvenido a Afiliamos\n`;
       await this.dynamoService.saveConversationHistory(
         userId,
-        userHistory,
+        updatedUserHistory,
         actions,
       );
-      return {
-        type: 'plantilla',
-        template: 'bienvenida_inicial ',
-        text: '',
-      };
+      return { type: 'plantilla', template: 'bienvenida_inicial', text: '' };
     }
+
+    // Manejo de acciones si el tipo es 'button'
     if (payload.type === 'button') {
       this.logger.log(
-        `Botón presionado por el usuario ${JSON.stringify(userHistory)}`,
+        `Botón presionado por el usuario: ${JSON.stringify(userHistory)}`,
       );
-      const resp: payLoad = await this.validateMessagePayload(payload, actions);
-      let updatedActions = {};
-      if (resp.actions) {
-        updatedActions = { ...actions, ...resp.actions };
-      } else {
-        updatedActions = { ...actions };
-      }
-      userHistory += `User: ${payload.text}\n`;
-      userHistory += `AI: ${resp.text}\n`;
+      const resp = await this.validateMessagePayload(payload, actions);
+      const updatedActions = resp.actions
+        ? { ...actions, ...resp.actions }
+        : { ...actions };
+
+      updatedUserHistory += currentUserMessage + `AI: ${resp.text}\n`;
       await this.dynamoService.saveConversationHistory(
         userId,
-        userHistory,
+        updatedUserHistory,
         updatedActions,
       );
+
       if (payload.action !== 'Pagar Mensualidad') {
         return {
           type: resp.type === 'plantilla' ? 'plantilla' : 'texto',
@@ -655,60 +631,54 @@ export class AgentOpenIaService implements OnModuleInit {
         };
       }
     }
-    userHistory += currentUserMessage + '\n';
+
+    updatedUserHistory += currentUserMessage;
     if (payload.text && payload.text.length <= 60) {
       const cachedResponse = await this.semanticCacheService.getAgentResponse(
-        payload.text ?? '',
+        payload.text,
       );
-
       if (cachedResponse && !cachedResponse.startsWith('[Respuesta del LLM]')) {
         this.logger.log(
           `[Cache Hit] Devolviendo respuesta de la caché para el usuario ${userId}`,
         );
-        const cacheResponseForHistory = `AI: ${cachedResponse}\n`;
-        userHistory += cacheResponseForHistory;
+        updatedUserHistory += `AI: ${cachedResponse}\n`;
         await this.dynamoService.saveConversationHistory(
           userId,
-          userHistory,
+          updatedUserHistory,
           actions,
         );
-        return {
-          type: 'texto',
-          template: '',
-          text: cachedResponse,
-        };
+        return { type: 'texto', template: '', text: cachedResponse };
       }
     }
 
     let agentResponse = 'Lo siento, no pude procesar tu solicitud.';
-    let actualAgentFinalOutput = '';
+    let finalAgentOutput = '';
 
     await withTrace('Orchestrator evaluator', async () => {
-      const orchestratorResult = await run(this.orchestratorAgent, userHistory);
-      for (const item of orchestratorResult.newItems) {
-        if (item.type === 'message_output_item') {
-          const text = item.content;
-          if (text) {
-            this.logger.debug(`  - paso: ${text}`);
-          }
+      const orchestratorResult = await run(
+        this.orchestratorAgent,
+        updatedUserHistory,
+      );
+      orchestratorResult.newItems.forEach((item) => {
+        if (item.type === 'message_output_item' && item.content) {
+          this.logger.debug(`  - paso: ${item.content}`);
         }
-      }
-      actualAgentFinalOutput = orchestratorResult.finalOutput;
-      agentResponse = actualAgentFinalOutput;
+      });
+
+      finalAgentOutput = orchestratorResult.finalOutput;
+      agentResponse = finalAgentOutput;
+
       const MAX_HISTORY_LENGTH = 1000;
-      if (userHistory.length > MAX_HISTORY_LENGTH) {
+      if (updatedUserHistory.length > MAX_HISTORY_LENGTH) {
         try {
           const synthesizerResult = await run(
             this.synthesizerAgent,
-            userHistory +
-              '\n\n' +
-              'Por favor, resume esta conversación de forma concisa, centrándote en las solicitudes del usuario, sus elecciones, precio y los datos que ha proporcionado. Omite saludos genéricos y detalles internos del asistente.',
+            `${updatedUserHistory}\n\nPor favor, resume esta conversación de forma concisa, centrándote en las solicitudes del usuario, sus elecciones, precio y los datos que ha proporcionado. Omite saludos genéricos y detalles internos del asistente.`,
           );
           const summarizedContent = synthesizerResult.finalOutput;
-
-          userHistory = `Resumen de la conversación anterior: ${summarizedContent}\n${currentUserMessage}\nAI: ${actualAgentFinalOutput}\n`;
+          updatedUserHistory = `Resumen de la conversación anterior: ${summarizedContent}\n${currentUserMessage}AI: ${finalAgentOutput}\n`;
           this.logger.log(
-            `Synthesized history updated for user ${userId}: ${userHistory}`,
+            `Synthesized history updated for user ${userId}: ${updatedUserHistory}`,
           );
         } catch (error) {
           this.logger.error(
@@ -717,22 +687,24 @@ export class AgentOpenIaService implements OnModuleInit {
           );
         }
       } else {
-        userHistory += `AI: ${actualAgentFinalOutput}\n`;
+        updatedUserHistory += `AI: ${finalAgentOutput}\n`;
       }
+
       if (payload.text && payload.text.length <= 50) {
         await this.semanticCacheService.trackAndCache(
           payload.text,
           agentResponse,
         );
       }
-      await this.dynamoService.saveConversationHistory(userId, userHistory);
+
+      await this.dynamoService.saveConversationHistory(
+        userId,
+        updatedUserHistory,
+        actions,
+      );
     });
 
-    return {
-      type: 'texto',
-      template: '',
-      text: agentResponse,
-    };
+    return { type: 'texto', template: '', text: agentResponse };
   }
 
   private async validateMessagePayload(
