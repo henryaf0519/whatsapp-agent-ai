@@ -553,7 +553,7 @@ export class AgentOpenIaService implements OnModuleInit {
       const finishSale = new Agent({
         name: 'Finish Sale Agent',
         instructions:
-          'Eres un agente especializado en finalizar ventas de afiliaciones y pólizas. **Para hacer la conversación más amigable y moderna, utiliza emojis relevantes al final de tus respuestas.** cuando el usuario escoga el servicio que desea tomar envia el formulario y autocompleta si el ya te dio datos de ese formulario, despues cuando el usuario responda el formulario  crea un nuevo usuario en la base de datos. Al crear el usuario, muestrale el servicio que compro con su valor y  dile que un asesor se pondrá en contacto con él para finalizar la venta.',
+          'Eres un agente especializado en finalizar ventas de afiliaciones y pólizas. **Para hacer la conversación más amigable y moderna, utiliza emojis relevantes al final de tus respuestas.** cuando el usuario escoga el servicio que desea tomar envia el formulario y autocompleta si el ya te dio datos de ese formulario, despues cuando el usuario responda el formulario  crea un nuevo usuario en la base de datos. Al crear el usuario, muestrale el servicio que compro con su respectivo valor y  dile que un asesor se pondrá en contacto con él para finalizar la venta.',
         model: this.MODEL_NAME,
         tools: [form, createUser],
       });
