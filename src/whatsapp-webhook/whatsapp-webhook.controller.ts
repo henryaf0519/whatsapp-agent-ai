@@ -462,6 +462,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
       );
       await this.dynamoService.createOrUpdateChatMode(message.from, 'IA');
       const chatMode = await this.dynamoService.getChatMode(message.from);
+      this.logger.debug('modo: ', chatMode);
       if (chatMode && chatMode === 'humano') {
         this.logger.log(
           `Chat ${message.from} está en control humano. La IA no responderá.`,

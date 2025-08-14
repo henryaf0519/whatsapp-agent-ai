@@ -641,13 +641,26 @@ export class DynamoService {
         conversationId,
         modo,
       },
+      // ✅ La clave de la solución: Condición para que solo se cree si no existe
+      ConditionExpression: 'attribute_not_exists(conversationId)',
     });
 
     try {
       await this.docClient.send(command);
-    } catch (error) {
-      console.error('Error al crear/actualizar el modo del chat:', error);
-      throw error;
+    } catch (error: unknown) {
+      if (
+        error &&
+        typeof error === 'object' &&
+        'name' in error &&
+        error.name === 'ConditionalCheckFailedException'
+      ) {
+        console.log(
+          `Registro para ${conversationId} ya existe. No se sobrescribió.`,
+        );
+      } else {
+        console.error('Error al crear/actualizar el modo del chat:', error);
+        throw error;
+      }
     }
   }
 }
