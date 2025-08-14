@@ -14,6 +14,7 @@ import { DatabaseModule } from './database/database.module';
 import { ConversationLogModule } from './conversation-log/conversation-log.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { SemanticCacheService } from './semantic-cache/semantic-cache.service';
+import { SocketGateway } from './socket/socket.gateway';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { SemanticCacheService } from './semantic-cache/semantic-cache.service';
     PruebaService,
     AgentOpenIaService,
     SemanticCacheService,
+    SocketGateway,
   ],
 })
 export class AppModule {}

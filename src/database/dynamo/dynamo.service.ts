@@ -15,7 +15,6 @@ import {
 import moment from 'moment-timezone';
 import { v4 as uuidv4 } from 'uuid';
 import { normalizeString } from '../../utils/utils';
-import { Console } from 'console';
 
 interface AgentScheduleItem {
   id: string;
@@ -507,7 +506,6 @@ export class DynamoService {
 
     try {
       const response = await this.docClient.send(command);
-      console.log('Mensaje guardado exitosamente:', response);
       return response;
     } catch (error) {
       console.error('Error al guardar el mensaje:', error);
@@ -530,7 +528,6 @@ export class DynamoService {
 
     try {
       const response = await this.docClient.send(command);
-      console.log('Conversación obtenida exitosamente:', response.Items);
       // Retorna los ítems (mensajes) de la conversación, o un array vacío si no hay.
       return response.Items ?? [];
     } catch (error) {
@@ -548,8 +545,6 @@ export class DynamoService {
 
     try {
       const response = await this.docClient.send(command);
-      this.logger.debug('response: ', JSON.stringify(response, null, 2))
-
       if (!response.Items || response.Items.length === 0) {
         return [];
       }
@@ -557,7 +552,6 @@ export class DynamoService {
       const uniqueConversations = new Set<string>();
 
       response.Items.forEach((item) => {
-        console.log(item);
         // El PK es un objeto, y el valor de la cadena está en item.PK.S
         if (item.PK) {
           const conversationId = item.PK.replace('CONVERSATION#', '');
