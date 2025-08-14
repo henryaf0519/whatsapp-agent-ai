@@ -3,11 +3,7 @@
 /* eslint-disable @typescript-eslint/require-await */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable, Logger } from '@nestjs/common';
-import {
-  DynamoDBClient,
-  ReturnValue,
-  UpdateItemCommand,
-} from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { ConfigService } from '@nestjs/config';
 import {
   DynamoDBDocumentClient,
@@ -20,7 +16,7 @@ import {
 import moment from 'moment-timezone';
 import { v4 as uuidv4 } from 'uuid';
 import { normalizeString } from '../../utils/utils';
-import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
+import { WhatsappService } from '../../whatsapp/whatsapp.service';
 
 interface AgentScheduleItem {
   id: string;
@@ -43,7 +39,10 @@ export class DynamoService {
   private readonly dynamoClient: DynamoDBClient;
   private readonly docClient: DynamoDBDocumentClient;
   private readonly logger = new Logger(DynamoService.name);
-  constructor(private config: ConfigService) {
+  constructor(
+    private config: ConfigService,
+    private readonly whatsappService: WhatsappService,
+  ) {
     this.dynamoClient = new DynamoDBClient({
       region: this.config.get<string>('AWS_REGION'),
     });
@@ -512,6 +511,33 @@ export class DynamoService {
 
     try {
       const response = await this.docClient.send(command);
+      return response;
+    } catch (error) {
+      console.error('Error al guardar el mensaje:', error);
+      throw error;
+    }
+  }
+
+  async handleAgentMessage(conversationId: string, text: string): Promise<any> {
+    // Generamos la clave de ordenación (SK) con un timestamp para el orden cronológico
+    const timestamp = new Date().toISOString();
+
+    const command = new PutCommand({
+      TableName: 'ConversationsTable',
+      Item: {
+        PK: `CONVERSATION#${conversationId}`, // La clave de partición agrupa la conversación
+        SK: `MESSAGE#${timestamp}`, // La clave de ordenación para el orden
+        from: 'IA',
+        type: 'text',
+        text: text,
+        id_mensaje_wa: '',
+        estado: 'SEND',
+      },
+    });
+
+    try {
+      const response = await this.docClient.send(command);
+      await this.whatsappService.sendMessage(conversationId, text);
       return response;
     } catch (error) {
       console.error('Error al guardar el mensaje:', error);

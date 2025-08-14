@@ -27,4 +27,12 @@ export class DynamoController {
   ) {
     return this.dynamoService.updateChatMode(conversationId, newMode);
   }
+
+  @Post('message')
+  handleAgentMessage(@Body() body: { conversationId: string; text: string }) {
+    return this.dynamoService.handleAgentMessage(
+      body.conversationId,
+      body.text,
+    );
+  }
 }
