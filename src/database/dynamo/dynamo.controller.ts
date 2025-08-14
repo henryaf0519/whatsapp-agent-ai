@@ -16,7 +16,15 @@ export class DynamoController {
   }
 
   @Get('messages/:conversationId')
-  async getMessages(@Param('conversationId') conversationId: string) {
+  getMessages(@Param('conversationId') conversationId: string) {
     return this.dynamoService.getMessages(conversationId);
+  }
+
+  @Post('control/:conversationId')
+  updateChatMode(
+    @Param('conversationId') conversationId: string,
+    @Body('newMode') newMode: 'IA' | 'humano',
+  ) {
+    return this.dynamoService.updateChatMode(conversationId, newMode);
   }
 }

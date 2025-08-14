@@ -3,7 +3,11 @@
 /* eslint-disable @typescript-eslint/require-await */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable, Logger } from '@nestjs/common';
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import {
+  DynamoDBClient,
+  ReturnValue,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import { ConfigService } from '@nestjs/config';
 import {
   DynamoDBDocumentClient,
@@ -11,10 +15,12 @@ import {
   PutCommand,
   QueryCommand,
   ScanCommand,
+  UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 import moment from 'moment-timezone';
 import { v4 as uuidv4 } from 'uuid';
 import { normalizeString } from '../../utils/utils';
+import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 
 interface AgentScheduleItem {
   id: string;
@@ -536,6 +542,29 @@ export class DynamoService {
     }
   }
 
+  async getChat(conversationId: string): Promise<any> {
+    const command = new QueryCommand({
+      TableName: 'ConversationsTable',
+      KeyConditionExpression: '#pk = :pkValue AND #sk = :skValue',
+      ExpressionAttributeNames: {
+        '#pk': 'PK',
+        '#sk': 'SK',
+      },
+      ExpressionAttributeValues: {
+        ':pkValue': `CONVERSATION#${conversationId}`,
+        ':skValue': `CONVERSATION#${conversationId}`,
+      },
+    });
+
+    try {
+      const response = await this.docClient.send(command);
+      return response.Items?.[0] ?? null;
+    } catch (error) {
+      console.error('Error al obtener los metadatos del chat:', error);
+      throw error;
+    }
+  }
+
   // En tu clase DynamoDBService
   async getConversations(): Promise<string[]> {
     const command = new ScanCommand({
@@ -562,6 +591,62 @@ export class DynamoService {
       return Array.from(uniqueConversations);
     } catch (error) {
       console.error('Error al obtener la lista de conversaciones:', error);
+      throw error;
+    }
+  }
+
+  async getChatMode(conversationId: string): Promise<'IA' | 'humano'> {
+    const command = new GetCommand({
+      TableName: 'ChatControl',
+      Key: { conversationId },
+    });
+
+    try {
+      const response = await this.docClient.send(command);
+      return response.Item?.modo || 'IA';
+    } catch (error) {
+      console.error('Error al obtener el modo de chat:', error);
+      throw error;
+    }
+  }
+
+  async updateChatMode(
+    conversationId: string,
+    newMode: 'IA' | 'humano',
+  ): Promise<void> {
+    const command = new UpdateCommand({
+      TableName: 'ChatControl',
+      Key: { conversationId },
+      UpdateExpression: 'SET modo = :newMode',
+      ExpressionAttributeValues: {
+        ':newMode': newMode,
+      },
+    });
+
+    try {
+      await this.docClient.send(command);
+    } catch (error) {
+      console.error('Error al actualizar el modo del chat:', error);
+      throw error;
+    }
+  }
+
+  async createOrUpdateChatMode(
+    conversationId: string,
+    modo: 'IA' | 'humano' = 'IA',
+  ): Promise<void> {
+    const command = new PutCommand({
+      TableName: 'ChatControl',
+      Item: {
+        conversationId,
+        modo,
+      },
+    });
+
+    try {
+      await this.docClient.send(command);
+    } catch (error) {
+      console.error('Error al crear/actualizar el modo del chat:', error);
       throw error;
     }
   }

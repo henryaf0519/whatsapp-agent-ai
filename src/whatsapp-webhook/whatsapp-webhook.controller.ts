@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import {
   Controller,
   Post,
@@ -459,6 +460,14 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         message.from,
         sendSocketUser,
       );
+      await this.dynamoService.createOrUpdateChatMode(message.from, 'IA');
+      const chatMode = await this.dynamoService.getChatMode(message.from);
+      if (chatMode && chatMode === 'humano') {
+        this.logger.log(
+          `Chat ${message.from} está en control humano. La IA no responderá.`,
+        );
+        return;
+      }
 
       const reply = await this.chatbotService.hablar(threadId, payload);
       const messageResp =
