@@ -1,4 +1,4 @@
-import { Controller, Body, Post, Get } from '@nestjs/common';
+import { Controller, Body, Post, Get, Param } from '@nestjs/common';
 import { DynamoService } from './dynamo.service';
 
 @Controller('dynamo')
@@ -10,11 +10,13 @@ export class DynamoController {
     return this.dynamoService.guardarDato(payload);
   }
 
-  @Get()
-  async getHuecos(@Body() payload: Record<string, any>) {
-    return this.dynamoService.obtenerHuecosDisponibles(
-      payload.name,
-      payload.fecha,
-    );
+  @Get('conversations')
+  async getConversations() {
+    return this.dynamoService.getConversations();
+  }
+
+  @Get('messages/:conversationId')
+  async getMessages(@Param('conversationId') conversationId: string) {
+    return this.dynamoService.getMessages(conversationId);
   }
 }

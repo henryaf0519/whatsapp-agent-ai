@@ -13,6 +13,7 @@ import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { AgentOpenIaService } from 'src/agent/agent-open-ia/agent-open-ia.service';
+import { DynamoService } from 'src/database/dynamo/dynamo.service';
 
 interface WhatsAppMessage {
   from: string; // El número de teléfono del remitente
@@ -87,6 +88,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
     private readonly whatsappService: WhatsappService,
     private readonly chatbotService: AgentOpenIaService,
     private readonly configService: ConfigService,
+    private readonly dynamoService: DynamoService,
   ) {
     this.validateConfiguration();
     this.startCleanupInterval();
@@ -436,10 +438,36 @@ export class WhatsappWebhookController implements OnModuleDestroy {
     try {
       // Get response from chatbot service
       this.logger.log(
-        `Processing message from ${message.from}`,
+        `Processing message from ${JSON.stringify(message, null, 2)}`,
         JSON.stringify,
       );
+      const messageUser =
+        message.type === 'button'
+          ? (message.button?.text ?? '')
+          : (message.text?.body ?? '');
+      await this.dynamoService.saveMessage(
+        message.from,
+        message.from,
+        messageUser,
+        message.id,
+        'RECEIVED',
+        payload.type,
+      );
       const reply = await this.chatbotService.hablar(threadId, payload);
+      this.logger.debug('Mensaje: ', JSON.stringify(reply, null, 2));
+      const messageResp =
+        reply.type === 'plantilla'
+          ? (reply.template ?? '')
+          : (reply.text ?? '');
+
+      await this.dynamoService.saveMessage(
+        message.from,
+        'IA',
+        messageResp,
+        message.id,
+        'SEND',
+        reply.type,
+      );
 
       if (!reply) {
         // Send a default error message

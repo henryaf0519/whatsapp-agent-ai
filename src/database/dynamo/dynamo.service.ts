@@ -15,6 +15,7 @@ import {
 import moment from 'moment-timezone';
 import { v4 as uuidv4 } from 'uuid';
 import { normalizeString } from '../../utils/utils';
+import { Console } from 'console';
 
 interface AgentScheduleItem {
   id: string;
@@ -477,6 +478,97 @@ export class DynamoService {
       return '';
     } catch (error) {
       this.logger.error('Error querying DynamoDB GSI:', error, 'findPolicies');
+    }
+  }
+
+  async saveMessage(
+    conversationId: string,
+    from: string,
+    text: string,
+    messageId: string,
+    status: string,
+    type: string,
+  ): Promise<any> {
+    // Generamos la clave de ordenación (SK) con un timestamp para el orden cronológico
+    const timestamp = new Date().toISOString();
+
+    const command = new PutCommand({
+      TableName: 'ConversationsTable',
+      Item: {
+        PK: `CONVERSATION#${conversationId}`, // La clave de partición agrupa la conversación
+        SK: `MESSAGE#${timestamp}`, // La clave de ordenación para el orden
+        from: from,
+        type: type,
+        text: text,
+        id_mensaje_wa: messageId,
+        estado: status,
+      },
+    });
+
+    try {
+      const response = await this.docClient.send(command);
+      console.log('Mensaje guardado exitosamente:', response);
+      return response;
+    } catch (error) {
+      console.error('Error al guardar el mensaje:', error);
+      throw error;
+    }
+  }
+
+  async getMessages(conversationId: string): Promise<any[]> {
+    const command = new QueryCommand({
+      TableName: 'ConversationsTable',
+      KeyConditionExpression: '#pk = :pkValue',
+      ExpressionAttributeNames: {
+        '#pk': 'PK',
+      },
+      ExpressionAttributeValues: {
+        ':pkValue': `CONVERSATION#${conversationId}`,
+      },
+      ScanIndexForward: true,
+    });
+
+    try {
+      const response = await this.docClient.send(command);
+      console.log('Conversación obtenida exitosamente:', response.Items);
+      // Retorna los ítems (mensajes) de la conversación, o un array vacío si no hay.
+      return response.Items ?? [];
+    } catch (error) {
+      console.error('Error al obtener la conversación:', error);
+      throw error;
+    }
+  }
+
+  // En tu clase DynamoDBService
+  async getConversations(): Promise<string[]> {
+    const command = new ScanCommand({
+      TableName: 'ConversationsTable',
+      ProjectionExpression: 'PK',
+    });
+
+    try {
+      const response = await this.docClient.send(command);
+      this.logger.debug('response: ', JSON.stringify(response, null, 2))
+
+      if (!response.Items || response.Items.length === 0) {
+        return [];
+      }
+
+      const uniqueConversations = new Set<string>();
+
+      response.Items.forEach((item) => {
+        console.log(item);
+        // El PK es un objeto, y el valor de la cadena está en item.PK.S
+        if (item.PK) {
+          const conversationId = item.PK.replace('CONVERSATION#', '');
+          uniqueConversations.add(conversationId);
+        }
+      });
+
+      return Array.from(uniqueConversations);
+    } catch (error) {
+      console.error('Error al obtener la lista de conversaciones:', error);
+      throw error;
     }
   }
 }
