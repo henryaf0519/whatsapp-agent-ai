@@ -459,6 +459,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
       const sendSocketUser = {
         from: message.from,
         text: payload?.text || '',
+        type: payload?.type || 'text',
         timestamp: new Date().toISOString(),
       };
       this.socketGateway.sendNewMessageNotification(
@@ -495,6 +496,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
       const sendSocketIA = {
         from: 'IA',
         text: messageResp,
+        type: 'text',
         timestamp: new Date().toISOString(),
       };
       this.socketGateway.sendNewMessageNotification(message.from, sendSocketIA);
