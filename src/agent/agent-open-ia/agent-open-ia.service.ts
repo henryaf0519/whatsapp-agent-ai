@@ -12,13 +12,12 @@ import { z } from 'zod';
 import { DynamoService } from 'src/database/dynamo/dynamo.service';
 import { Pinecone } from '@pinecone-database/pinecone';
 import { SemanticCacheService } from 'src/semantic-cache/semantic-cache.service';
-import { StringPromptValue } from '@langchain/core/prompt_values';
 
 interface PineconeSearchResult {
   fields?: Record<string, string | undefined>;
 }
 interface payLoad {
-  type: 'text' | 'button' | 'plantilla' | 'unsupported';
+  type: 'text' | 'button' | 'image' | 'plantilla' | 'unsupported';
   text?: string;
   action?: string;
   template?: string;

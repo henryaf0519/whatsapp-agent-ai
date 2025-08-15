@@ -92,4 +92,29 @@ export class S3ConversationLogService {
       stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
     });
   }
+
+  async uploadMedia(
+    key: string,
+    body: Buffer,
+    contentType: string,
+    contentLength: number,
+  ): Promise<string> {
+    try {
+      const command = new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        Body: body,
+        ContentType: contentType,
+        ContentLength: contentLength,
+      });
+      await this.s3.send(command);
+
+      const s3Url = `https://${this.bucket}.s3.${this.config.get<string>('AWS_REGION')}.amazonaws.com/${key}`;
+      this.logger.log(`Medio subido a S3: ${s3Url}`);
+      return s3Url;
+    } catch (err) {
+      this.logger.error(`Failed to upload media to S3: ${key}`, err as any);
+      throw new Error('Error al subir el archivo a S3.');
+    }
+  }
 }

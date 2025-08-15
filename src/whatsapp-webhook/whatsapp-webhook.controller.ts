@@ -18,15 +18,21 @@ import { DynamoService } from 'src/database/dynamo/dynamo.service';
 import { SocketGateway } from 'src/socket/socket.gateway';
 
 interface WhatsAppMessage {
-  from: string; // El número de teléfono del remitente
-  id: string; // ID único del mensaje de WhatsApp
-  timestamp: string; // Timestamp del mensaje
+  from: string;
+  id: string;
+  timestamp: string;
   text?: { body: string };
   button?: {
-    payload: string; // El 'payload' del botón, un identificador único
-    text: string; // El texto visible del botón
-  }; // Contenido del mensaje de texto
-  type: string; // Tipo de mensaje (text, image, etc.)
+    payload: string;
+    text: string;
+  };
+  image?: {
+    caption?: string;
+    mime_type: string;
+    sha256: string;
+    id: string;
+  };
+  type: string;
 }
 interface WhatsAppChange {
   value: {
@@ -65,16 +71,18 @@ interface ProcessedMessage {
 }
 
 interface payLoad {
-  type: 'text' | 'button' | 'unsupported';
+  type: 'text' | 'button' | 'image' | 'unsupported';
   text?: string;
   action?: string;
 }
 
 interface MessageContent {
-  type: 'text' | 'button' | 'unsupported';
-  body?: string; // Para mensajes de texto
-  payload?: string; // Para respuestas de botones
-  text?: string; // Para respuestas de botones
+  type: 'text' | 'button' | 'image' | 'unsupported';
+  body?: string;
+  payload?: string;
+  text?: string;
+  imageUrl?: string;
+  caption?: string;
 }
 
 @Controller('whatsapp')
@@ -198,24 +206,27 @@ export class WhatsappWebhookController implements OnModuleDestroy {
     return payload as WhatsAppMessagePayload;
   }
 
-  private validateMessage(message: WhatsAppMessage): MessageContent | null {
+  private async validateMessage(
+    message: WhatsAppMessage,
+  ): Promise<MessageContent | null> {
     if (!message.from || !message.id) {
       this.logger.warn('Message missing required fields (from or id)', {
         message,
       });
-      return null;
+      return Promise.resolve(null);
     }
+    this.logger.debug('Validating message', JSON.stringify(message, null, 2));
     if (message.type === 'button' && message.button) {
       this.logger.debug('Message is a button reply', {
         messageId: message.id,
         payload: message.button.payload,
         text: message.button.text,
       });
-      return {
+      return Promise.resolve({
         type: 'button',
         payload: message.button.payload,
         text: message.button.text,
-      };
+      });
     }
     if (message.type === 'text' && message.text?.body) {
       const textBody = message.text.body;
@@ -225,25 +236,41 @@ export class WhatsappWebhookController implements OnModuleDestroy {
           messageId: message.id,
           length: textBody.length,
         });
-        return null;
+        return Promise.resolve({ type: 'unsupported' });
       }
 
       this.logger.debug('Message is a text message', {
         messageId: message.id,
         body: textBody,
       });
-      return {
+      return Promise.resolve({
         type: 'text',
         body: textBody,
-      };
+      });
+    }
+    if (message.type === 'image' && message.image?.id) {
+      try {
+        const imageUrl = await this.whatsappService.processAndUploadMedia(
+          message.image.id,
+          message.image.mime_type,
+        );
+        return Promise.resolve({
+          type: 'image',
+          text: imageUrl,
+        });
+      } catch (error) {
+        // Maneja errores si no se puede obtener la URL
+        this.logger.error('Failed to get media URL', { error });
+        return Promise.resolve({ type: 'unsupported' });
+      }
     }
     this.logger.warn('Unsupported message type', {
       messageId: message.id,
       type: message.type,
     });
-    return {
+    return Promise.resolve({
       type: 'unsupported',
-    };
+    });
   }
 
   @Get('webhook')
@@ -403,32 +430,14 @@ export class WhatsappWebhookController implements OnModuleDestroy {
     if (this.isDuplicate(message.id)) {
       return;
     }
-    const messageContent = this.validateMessage(message);
+    const messageContent = await this.validateMessage(message);
     if (!messageContent) {
       return;
     }
     // Validate message
-    if (messageContent.type === 'button') {
-      payload = {
-        type: 'button',
-        action: messageContent.payload,
-        text: messageContent.text,
-      };
+    payload = this.createPayload(messageContent);
 
-      this.logger.log(
-        'Button message received',
-        JSON.stringify(payload, null, 2),
-      );
-    } else if (messageContent.type === 'text') {
-      payload = {
-        type: 'text',
-        text: (messageContent.body ?? '').trim(),
-      };
-      this.logger.log(
-        'Text message received',
-        JSON.stringify(payload, null, 2),
-      );
-    } else {
+    if (payload && payload.type === 'unsupported') {
       this.logger.warn('Unsupported message type received', {
         messageId: message.id,
         type: message.type,
@@ -439,21 +448,17 @@ export class WhatsappWebhookController implements OnModuleDestroy {
     const threadId = this.generateThreadId(message.from);
 
     try {
-      const messageUser =
-        message.type === 'button'
-          ? (message.button?.text ?? '')
-          : (message.text?.body ?? '');
       await this.dynamoService.saveMessage(
         message.from,
         message.from,
-        messageUser,
+        payload?.text || '',
         message.id,
         'RECEIVED',
-        payload.type,
+        payload?.type || '',
       );
       const sendSocketUser = {
         from: message.from,
-        text: messageUser,
+        text: payload?.text || '',
         timestamp: new Date().toISOString(),
       };
       this.socketGateway.sendNewMessageNotification(
@@ -470,7 +475,10 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         return;
       }
 
-      const reply = await this.chatbotService.hablar(threadId, payload);
+      const reply = await this.chatbotService.hablar(
+        threadId,
+        payload as payLoad,
+      );
       const messageResp =
         reply.type === 'plantilla'
           ? (reply.template ?? '')
@@ -532,6 +540,43 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         });
       }
     }
+  }
+
+  private createPayload(messageContent: MessageContent): any {
+    let payload: any;
+
+    this.logger.debug(
+      'messageContent: ',
+      JSON.stringify(messageContent, null, 2),
+    );
+
+    switch (messageContent.type) {
+      case 'button':
+        payload = {
+          type: 'button',
+          action: messageContent.payload,
+          text: messageContent.text,
+        };
+        break;
+      case 'text':
+        payload = {
+          type: 'text',
+          text: (messageContent.body ?? '').trim(),
+        };
+        break;
+      case 'image':
+        payload = {
+          type: 'image',
+          text: messageContent.text,
+        };
+        break;
+      case 'unsupported':
+      default:
+        payload = { type: 'unsupported' };
+        break;
+    }
+
+    return payload;
   }
 
   // Cleanup on module destroy

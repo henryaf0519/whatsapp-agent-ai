@@ -1,6 +1,8 @@
 import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios, { AxiosError, AxiosResponse } from 'axios';
+import { S3ConversationLogService } from 'src/conversation-log/s3-conversation-log.service';
+import { Readable } from 'stream';
 
 interface WhatsAppMessageBody {
   messaging_product: string;
@@ -29,7 +31,10 @@ export class WhatsappService {
   private readonly maxRetries = 3;
   private readonly retryDelay = 1000; // 1 second
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly s3Service: S3ConversationLogService,
+  ) {
     this.whatsappApiUrl =
       this.configService.get<string>('WHATSAPP_API_URL') || '';
     this.whatsappToken =
@@ -368,7 +373,6 @@ export class WhatsappService {
    */
   async healthCheck(): Promise<boolean> {
     try {
-      // Simple test to verify API connectivity without sending a message
       const response = await axios.get(
         this.whatsappApiUrl.replace('/messages', ''), // Remove /messages if present
         {
@@ -382,6 +386,68 @@ export class WhatsappService {
     } catch (error) {
       this.logger.error('WhatsApp API health check failed:', error);
       return false;
+    }
+  }
+
+  private streamToBuffer(stream: Readable): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      stream.on('data', (chunk) => chunks.push(chunk));
+      stream.on('end', () => resolve(Buffer.concat(chunks)));
+      stream.on('error', reject);
+    });
+  }
+
+  async processAndUploadMedia(
+    mediaId: string,
+    mimeType: string,
+  ): Promise<string> {
+    try {
+      const mediaUrl = await this.getMediaUrl(mediaId);
+
+      const response: AxiosResponse = await axios({
+        url: mediaUrl,
+        method: 'GET',
+        responseType: 'stream',
+        headers: {
+          Authorization: `Bearer ${this.whatsappToken}`,
+        },
+      });
+
+      const fileBuffer = await this.streamToBuffer(response.data);
+      const contentLength = response.headers['content-length'];
+      if (!contentLength) {
+        throw new Error(
+          'No se pudo obtener el tamaño del archivo desde los encabezados.',
+        );
+      }
+      const fileExtension = mimeType.split('/')[1];
+      const fileName = `${mediaId}.${fileExtension}`;
+
+      return this.s3Service.uploadMedia(
+        fileName,
+        fileBuffer,
+        mimeType,
+        parseInt(contentLength, 10),
+      );
+    } catch (error) {
+      this.logger.error('Error al procesar y subir el medio a S3.', error);
+      throw new Error('Fallo al procesar el archivo multimedia.');
+    }
+  }
+
+  private async getMediaUrl(mediaId: string): Promise<string> {
+    const url = `https://graph.facebook.com/v22.0/${mediaId}`;
+    try {
+      const response: AxiosResponse<{ url: string }> = await axios.get(url, {
+        headers: {
+          Authorization: `Bearer ${this.whatsappToken}`,
+        },
+      });
+      return response.data.url;
+    } catch (error) {
+      this.logger.error('Error al obtener URL del medio', error);
+      throw new Error('No se pudo obtener la URL del archivo.');
     }
   }
 }
