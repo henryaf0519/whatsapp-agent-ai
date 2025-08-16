@@ -15,6 +15,7 @@ import { ConversationLogModule } from './conversation-log/conversation-log.modul
 import { ScheduleModule } from '@nestjs/schedule';
 import { SemanticCacheService } from './semantic-cache/semantic-cache.service';
 import { SocketGateway } from './socket/socket.gateway';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { SocketGateway } from './socket/socket.gateway';
     ScheduleModule.forRoot(),
     DatabaseModule,
     ConversationLogModule,
+    AuthModule,
   ],
   controllers: [
     AppController,

@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-redundant-type-constituents */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 
 /* eslint-disable @typescript-eslint/require-await */
@@ -17,6 +19,7 @@ import moment from 'moment-timezone';
 import { v4 as uuidv4 } from 'uuid';
 import { normalizeString } from '../../utils/utils';
 import { WhatsappService } from '../../whatsapp/whatsapp.service';
+import * as bcrypt from 'bcrypt';
 
 interface AgentScheduleItem {
   id: string;
@@ -687,6 +690,51 @@ export class DynamoService {
         console.error('Error al crear/actualizar el modo del chat:', error);
         throw error;
       }
+    }
+  }
+
+  async findUserByEmail(email: string): Promise<any | undefined> {
+    const command = new GetCommand({
+      TableName: 'login',
+      Key: {
+        email: email,
+      },
+    });
+
+    try {
+      const result = await this.docClient.send(command);
+      this.logger.debug('result: ', JSON.stringify(result));
+      return result.Item;
+    } catch (error) {
+      this.logger.error(
+        'Error al encontrar el usuario por email:',
+        error,
+        'findUserByEmail',
+      );
+      return undefined;
+    }
+  }
+
+  async createUserLogin(email: string, passwordHashed: string): Promise<any> {
+    const command = new PutCommand({
+      TableName: 'login',
+      Item: {
+        email: email,
+        password: passwordHashed,
+      },
+    });
+
+    try {
+      await this.docClient.send(command);
+      this.logger.log(`Usuario ${email} creado en la tabla 'login'.`);
+      return { email };
+    } catch (error) {
+      this.logger.error(
+        'Error al crear usuario en la tabla login:',
+        error,
+        'createUser',
+      );
+      throw new Error('No se pudo crear el usuario en la base de datos.');
     }
   }
 }
