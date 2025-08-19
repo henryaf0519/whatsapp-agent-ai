@@ -275,7 +275,7 @@ export class WhatsappService {
         template: {
           name: templateName,
           language: {
-            code: 'en', // O "es" si la plantilla está en español
+            code: 'es_CO', // O "es" si la plantilla está en español
           },
         },
       };

@@ -650,7 +650,7 @@ export class AgentOpenIaService implements OnModuleInit {
     );
 
     // Verificar la acción del botón y devolver la respuesta adecuada
-    if (payload.action !== 'Pagar Mensualidad') {
+    if (payload.action !== 'Pagar mensualidad') {
       return {
         type: resp.type === 'plantilla' ? 'plantilla' : 'texto',
         template: resp.template ?? '',
@@ -839,10 +839,10 @@ export class AgentOpenIaService implements OnModuleInit {
     actions: any,
   ): Promise<payLoad> {
     switch (payload.action) {
-      case 'Independiente':
+      case 'Independientes':
         return {
           type: 'plantilla',
-          template: 'servicioindependientes',
+          template: 'independientes',
           text: 'Mostrar servicios independientes',
           actions: {
             services: 'Independientes',
@@ -850,10 +850,10 @@ export class AgentOpenIaService implements OnModuleInit {
           },
         };
 
-      case 'Dependiente':
+      case 'Dependientes':
         return {
           type: 'plantilla',
-          template: 'serviciosdependientes',
+          template: 'dependientes',
           text: 'Mostrar servicios dependientes',
           actions: {
             services: 'Dependiente',
