@@ -642,7 +642,7 @@ export class DynamoService {
   async updateChatMode(
     conversationId: string,
     newMode: 'IA' | 'humano',
-  ): Promise<void> {
+  ): Promise<{ success: boolean; message: string }> {
     const command = new UpdateCommand({
       TableName: 'ChatControl',
       Key: { conversationId },
@@ -654,6 +654,7 @@ export class DynamoService {
 
     try {
       await this.docClient.send(command);
+      return { success: true, message: 'Modo actualizado correctamente.' };
     } catch (error) {
       console.error('Error al actualizar el modo del chat:', error);
       throw error;

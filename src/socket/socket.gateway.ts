@@ -19,7 +19,7 @@ import { Logger } from '@nestjs/common';
 export interface MessagePayload {
   from: string;
   text: string;
-  timestamp: string;
+  SK: string;
   // Agrega aquí otros campos que pueda tener tu mensaje.
 }
 
