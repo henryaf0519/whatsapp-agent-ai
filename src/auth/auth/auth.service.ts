@@ -1,16 +1,19 @@
 /* eslint-disable @typescript-eslint/require-await */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { DynamoService } from '../../database/dynamo/dynamo.service';
 import * as bcrypt from 'bcrypt';
+import { WhatsappService } from 'src/whatsapp/whatsapp.service';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   constructor(
     private jwtService: JwtService,
-    private dynamoService: DynamoService, // Inyecta el DynamoService
+    private dynamoService: DynamoService,
+    private readonly whatsappService: WhatsappService,
   ) {}
 
   async validateUser(email: string, pass: string): Promise<any> {
@@ -37,18 +40,73 @@ export class AuthService {
 
   async login(user: any): Promise<{ access_token: string }> {
     const payload = { sub: user.email, username: user.email };
-    console.log('AuthService - login: Payload for JWT:', payload);
+    const accessToken = this.jwtService.sign(payload);
+
+    if (user.waba_id && user.whatsapp_token) {
+      this.logger.log(
+        `Iniciando sincronización de plantillas para ${user.email}`,
+      );
+
+      this.syncUserTemplates(user.waba_id, user.whatsapp_token).catch((err) =>
+        this.logger.error(`Falló la sincronización para ${user.email}`, err),
+      );
+    }
+
     return {
-      access_token: this.jwtService.sign(payload),
+      access_token: accessToken,
     };
   }
 
-  async createUser(email: string, password: string): Promise<any> {
+  async createUser(
+    email: string,
+    password: string,
+    waba_id: string,
+    whatsapp_token: string,
+  ): Promise<any> {
     const hashedPassword = await bcrypt.hash(password, 10);
     const user = await this.dynamoService.createUserLogin(
       email,
       hashedPassword,
+      waba_id,
+      whatsapp_token,
     );
     return user;
+  }
+
+  /**
+   * Orquesta la sincronización de plantillas para un usuario específico.
+   * @param wabaId - El ID de la cuenta de WhatsApp Business del usuario.
+   * @param token - El token de acceso del usuario.
+   */
+  private async syncUserTemplates(
+    wabaId: string,
+    token: string,
+  ): Promise<void> {
+    try {
+      // 1. Obtiene las plantillas usando el ID y token específicos del usuario
+      const templates = await this.whatsappService.getMessageTemplates(
+        wabaId,
+        token,
+      );
+
+      if (!templates || templates.length === 0) {
+        this.logger.log(
+          `No se encontraron plantillas para sincronizar para waba_id: ${wabaId}`,
+        );
+        return;
+      }
+
+      // 2. Guarda las plantillas en DynamoDB asociadas a ese wabaId
+      await this.dynamoService.saveTemplatesForAccount(wabaId, templates);
+
+      this.logger.log(
+        `Sincronización de ${templates.length} plantillas completada para ${wabaId}`,
+      );
+    } catch (error) {
+      // Los errores ya se loguean en los servicios de más bajo nivel
+      this.logger.error(
+        `Falló el proceso de sincronización para waba_id ${wabaId}`,
+      );
+    }
   }
 }

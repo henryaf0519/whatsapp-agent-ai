@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { WhatsappService } from './whatsapp/whatsapp.service';
 import { WhatsappWebhookController } from './whatsapp-webhook/whatsapp-webhook.controller';
 import { ConfigModule } from '@nestjs/config';
 import { EmailService } from './email/email.service';
@@ -16,6 +15,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { SemanticCacheService } from './semantic-cache/semantic-cache.service';
 import { SocketGateway } from './socket/socket.gateway';
 import { AuthModule } from './auth/auth.module';
+import { WhatsappModule } from './whatsapp/whatsapp.module';
 
 @Module({
   imports: [
@@ -26,6 +26,7 @@ import { AuthModule } from './auth/auth.module';
     DatabaseModule,
     ConversationLogModule,
     AuthModule,
+    WhatsappModule,
   ],
   controllers: [
     AppController,
@@ -35,7 +36,6 @@ import { AuthModule } from './auth/auth.module';
   ],
   providers: [
     AppService,
-    WhatsappService,
     EmailService,
     CalendarService,
     PruebaService,

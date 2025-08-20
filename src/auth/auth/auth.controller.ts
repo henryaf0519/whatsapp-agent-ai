@@ -28,12 +28,20 @@ export class AuthController {
   }
 
   @Post('register')
-  @HttpCode(HttpStatus.CREATED) // Código de estado 201 Created
+  @HttpCode(HttpStatus.CREATED)
   async register(
     @Body('email') email: string,
     @Body('password') password: string,
+    @Body('waba_id') waba_id: string,
+    @Body('whatsapp_token') whatsapp_token: string,
   ) {
-    const user = await this.authService.createUser(email, password);
+    // ✅ PASAMOS LOS NUEVOS CAMPOS AL SERVICIO
+    const user = await this.authService.createUser(
+      email,
+      password,
+      waba_id,
+      whatsapp_token,
+    );
     return {
       message: 'Usuario registrado con éxito',
       email: user.email,

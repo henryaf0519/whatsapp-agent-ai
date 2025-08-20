@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios, { AxiosError, AxiosResponse } from 'axios';
@@ -448,6 +450,50 @@ export class WhatsappService {
     } catch (error) {
       this.logger.error('Error al obtener URL del medio', error);
       throw new Error('No se pudo obtener la URL del archivo.');
+    }
+  }
+
+  /**
+   * Obtiene las plantillas de mensajes para una cuenta de WhatsApp Business específica.
+   * @param wabaId - El ID de la cuenta de WhatsApp Business del usuario.
+   * @param token - El token de acceso de la API de WhatsApp del usuario.
+   * @returns Una promesa que resuelve a una lista de plantillas.
+   */
+  async getMessageTemplates(wabaId: string, token: string): Promise<any[]> {
+    const url = `https://graph.facebook.com/v23.0/${wabaId}/message_templates`;
+    this.logger.log(`Obteniendo plantillas para waba_id: ${wabaId}`);
+
+    try {
+      const response = await axios.get(url, {
+        headers: {
+          Authorization: `Bearer ${token}`, // <-- USA EL TOKEN DEL USUARIO
+        },
+        params: {
+          fields: 'name,components,language,status,category', // Campos que queremos obtener
+        },
+      });
+
+      const templates = response.data.data || [];
+      this.logger.log(
+        `Se obtuvieron ${templates.length} plantillas para ${wabaId}.`,
+      );
+      return templates;
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        this.logger.error(
+          `Error al obtener plantillas para ${wabaId}`,
+          error.response?.data,
+        );
+        throw new HttpException(
+          error.response?.data?.error?.message || 'Error en la API de WhatsApp',
+          error.response?.status || HttpStatus.INTERNAL_SERVER_ERROR,
+        );
+      }
+      this.logger.error('Error inesperado al obtener plantillas', error);
+      throw new HttpException(
+        'Error inesperado',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
     }
   }
 }

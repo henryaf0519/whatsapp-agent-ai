@@ -5,9 +5,10 @@
 /* eslint-disable @typescript-eslint/require-await */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable, Logger } from '@nestjs/common';
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, WriteRequest } from '@aws-sdk/client-dynamodb';
 import { ConfigService } from '@nestjs/config';
 import {
+  BatchWriteCommand,
   DynamoDBDocumentClient,
   GetCommand,
   PutCommand,
@@ -716,12 +717,20 @@ export class DynamoService {
     }
   }
 
-  async createUserLogin(email: string, passwordHashed: string): Promise<any> {
+  async createUserLogin(
+    email: string,
+    passwordHashed: string,
+    waba_id: string,
+    whatsapp_token: string,
+  ): Promise<any> {
     const command = new PutCommand({
       TableName: 'login',
       Item: {
         email: email,
         password: passwordHashed,
+        // ✅ CAMPOS NUEVOS AÑADIDOS AL ITEM
+        waba_id: waba_id,
+        whatsapp_token: whatsapp_token,
       },
     });
 
@@ -736,6 +745,78 @@ export class DynamoService {
         'createUser',
       );
       throw new Error('No se pudo crear el usuario en la base de datos.');
+    }
+  }
+
+  /**
+   * Guarda o actualiza un lote de plantillas para una cuenta de WhatsApp específica.
+   * @param wabaId - El ID de la cuenta de WhatsApp Business.
+   * @param templates - El array de objetos de plantilla obtenidos de la API de Meta.
+   */
+  async saveTemplatesForAccount(
+    wabaId: string,
+    templates: any[],
+  ): Promise<void> {
+    if (!templates || templates.length === 0) {
+      return;
+    }
+
+    const validTemplates = templates.filter(
+      (template) =>
+        template.status === 'APPROVED' &&
+        template.components &&
+        template.components.some((c) => c.type === 'BODY'),
+    );
+
+    if (validTemplates.length === 0) {
+      this.logger.log('No hay plantillas válidas para guardar.');
+      return;
+    }
+
+    const putRequests = validTemplates.map((template) => {
+      const bodyComponent = template.components.find((c) => c.type === 'BODY');
+      const buttonsComponent = template.components.find(
+        (c) => c.type === 'BUTTONS',
+      );
+
+      return {
+        PutRequest: {
+          Item: {
+            waba_id: wabaId,
+            name: template.name,
+            language: template.language,
+            category: template.category,
+            body: bodyComponent.text || '',
+            buttons: buttonsComponent
+              ? buttonsComponent.buttons.map((btn) => ({
+                  id: btn.text.toLowerCase().replace(/[^a-z0-9]+/g, '_'),
+                  title: btn.text,
+                }))
+              : [],
+          },
+        },
+      };
+    });
+
+    for (let i = 0; i < putRequests.length; i += 25) {
+      const batch = putRequests.slice(i, i + 25);
+      const command = new BatchWriteCommand({
+        RequestItems: {
+          whatsappTemplates: batch,
+        },
+      });
+
+      try {
+        await this.docClient.send(command);
+        this.logger.log(
+          `Lote de ${batch.length} plantillas guardado para ${wabaId}`,
+        );
+      } catch (error) {
+        this.logger.error(
+          `Error guardando lote de plantillas para ${wabaId}`,
+          error,
+        );
+      }
     }
   }
 }
