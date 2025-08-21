@@ -38,8 +38,14 @@ export class AuthService {
     return result;
   }
 
-  async login(user: any): Promise<{ access_token: string; templates: any[] }> {
-    const payload = { sub: user.email, username: user.email };
+  async login(
+    user: any,
+  ): Promise<{ access_token: string; templates: any[]; user: any }> {
+    const payload = {
+      sub: user.email,
+      username: user.email,
+      waba_id: user.waba_id, // <-- Añadimos el waba_id al payload del token
+    };
     const accessToken = this.jwtService.sign(payload);
 
     let userTemplates: any[] = [];
@@ -48,10 +54,7 @@ export class AuthService {
       this.logger.log(
         `Sincronizando y obteniendo plantillas para ${user.email}`,
       );
-      // Hacemos que la sincronización sea un paso obligatorio del login
       await this.syncUserTemplates(user.waba_id, user.whatsapp_token);
-
-      // Una vez sincronizado, obtenemos las plantillas de nuestra base de datos
       userTemplates = await this.dynamoService.getTemplatesForAccount(
         user.waba_id,
       );
@@ -64,6 +67,7 @@ export class AuthService {
     return {
       access_token: accessToken,
       templates: userTemplates,
+      user: user, // <-- Devolvemos el objeto del usuario
     };
   }
 
