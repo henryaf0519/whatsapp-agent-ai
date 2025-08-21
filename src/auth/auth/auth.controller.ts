@@ -70,6 +70,17 @@ export class AuthController {
   @Get('profile')
   @UseGuards(AuthGuard('jwt'))
   getProfile(@Req() req: Request) {
-    return req.user;
+    const userFromJwt = req.user as {
+      userId: string;
+      email: string;
+      waba_id: string;
+    };
+
+    const safeUserProfile = {
+      email: userFromJwt.email,
+      waba_id: userFromJwt.waba_id,
+    };
+
+    return safeUserProfile;
   }
 }

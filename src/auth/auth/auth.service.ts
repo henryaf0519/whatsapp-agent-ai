@@ -64,10 +64,15 @@ export class AuthService {
       );
     }
 
+    const safeUser = {
+      email: user.email,
+      waba_id: user.waba_id,
+    };
+
     return {
       access_token: accessToken,
       templates: userTemplates,
-      user: user, // <-- Devolvemos el objeto del usuario
+      user: safeUser,
     };
   }
 
