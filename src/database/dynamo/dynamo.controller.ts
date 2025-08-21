@@ -1,7 +1,9 @@
-import { Controller, Body, Post, Get, Param } from '@nestjs/common';
+import { Controller, Body, Post, Get, Param, UseGuards } from '@nestjs/common';
 import { DynamoService } from './dynamo.service';
+import { AuthGuard } from '@nestjs/passport';
 
 @Controller('dynamo')
+@UseGuards(AuthGuard('jwt'))
 export class DynamoController {
   constructor(private readonly dynamoService: DynamoService) {}
 
