@@ -38,22 +38,32 @@ export class AuthService {
     return result;
   }
 
-  async login(user: any): Promise<{ access_token: string }> {
+  async login(user: any): Promise<{ access_token: string; templates: any[] }> {
     const payload = { sub: user.email, username: user.email };
     const accessToken = this.jwtService.sign(payload);
 
+    let userTemplates: any[] = [];
+
     if (user.waba_id && user.whatsapp_token) {
       this.logger.log(
-        `Iniciando sincronización de plantillas para ${user.email}`,
+        `Sincronizando y obteniendo plantillas para ${user.email}`,
       );
+      // Hacemos que la sincronización sea un paso obligatorio del login
+      await this.syncUserTemplates(user.waba_id, user.whatsapp_token);
 
-      this.syncUserTemplates(user.waba_id, user.whatsapp_token).catch((err) =>
-        this.logger.error(`Falló la sincronización para ${user.email}`, err),
+      // Una vez sincronizado, obtenemos las plantillas de nuestra base de datos
+      userTemplates = await this.dynamoService.getTemplatesForAccount(
+        user.waba_id,
+      );
+    } else {
+      this.logger.warn(
+        `El usuario ${user.email} no tiene waba_id o token. No se devolverán plantillas.`,
       );
     }
 
     return {
       access_token: accessToken,
+      templates: userTemplates,
     };
   }
 

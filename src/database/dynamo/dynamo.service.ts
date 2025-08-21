@@ -819,4 +819,30 @@ export class DynamoService {
       }
     }
   }
+
+  /**
+   * Obtiene todas las plantillas asociadas a una cuenta de WhatsApp.
+   * @param wabaId - El ID de la cuenta de WhatsApp Business.
+   * @returns Un array con las plantillas encontradas.
+   */
+  async getTemplatesForAccount(wabaId: string): Promise<any[]> {
+    const command = new QueryCommand({
+      TableName: 'whatsappTemplates',
+      KeyConditionExpression: 'waba_id = :wabaId',
+      ExpressionAttributeValues: {
+        ':wabaId': wabaId,
+      },
+    });
+
+    try {
+      const response = await this.docClient.send(command);
+      this.logger.log(
+        `Se encontraron ${response.Items?.length || 0} plantillas para ${wabaId}`,
+      );
+      return response.Items || [];
+    } catch (error) {
+      this.logger.error(`Error al obtener plantillas para ${wabaId}`, error);
+      return []; // Devolvemos un array vacío en caso de error
+    }
+  }
 }
