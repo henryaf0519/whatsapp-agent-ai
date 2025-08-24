@@ -17,7 +17,7 @@ interface PineconeSearchResult {
   fields?: Record<string, string | undefined>;
 }
 interface payLoad {
-  type: 'text' | 'button' | 'image' | 'plantilla' | 'unsupported';
+  type: 'text' | 'button' | 'image' | 'audio' | 'plantilla' | 'unsupported';
   text?: string;
   action?: string;
   template?: string;
@@ -28,7 +28,7 @@ interface payLoad {
 }
 
 interface sendWhastappResponse {
-  type: 'plantilla' | 'texto';
+  type: 'plantilla' | 'texto' | 'audio';
   template?: string;
   text?: string;
 }

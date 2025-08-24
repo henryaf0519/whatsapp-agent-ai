@@ -496,4 +496,39 @@ export class WhatsappService {
       );
     }
   }
+
+  async downloadMedia(
+    mediaId: string,
+  ): Promise<{ buffer: Buffer; mimeType: string }> {
+    this.logger.log(`Obteniendo URL para mediaId: ${mediaId}`);
+
+    // 1. Obtener la URL del medio
+    const urlResponse = await axios.get(
+      `https://graph.facebook.com/v20.0/${mediaId}`,
+      {
+        headers: { Authorization: `Bearer ${this.whatsappToken}` },
+      },
+    );
+    const mediaUrl = urlResponse.data.url;
+
+    if (!mediaUrl) {
+      throw new Error('No se pudo obtener la URL del medio.');
+    }
+
+    // 2. Descargar el archivo
+    this.logger.log(`Descargando medio desde: ${mediaUrl}`);
+    const downloadResponse = await axios.get(mediaUrl, {
+      headers: { Authorization: `Bearer ${this.whatsappToken}` },
+      responseType: 'stream',
+    });
+
+    const buffer = await this.streamToBuffer(downloadResponse.data);
+    const mimeType = downloadResponse.headers['content-type'];
+
+    this.logger.log(
+      `Medio descargado. Tamaño: ${buffer.length} bytes, Tipo: ${mimeType}`,
+    );
+
+    return { buffer, mimeType };
+  }
 }
