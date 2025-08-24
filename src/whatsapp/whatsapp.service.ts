@@ -531,4 +531,28 @@ export class WhatsappService {
 
     return { buffer, mimeType };
   }
+
+  /**
+   * Sube un buffer de un archivo multimedia directamente a S3.
+   * @param key - La ruta y nombre del archivo en S3 (ej. 'audio/user-id/message-id.ogg')
+   * @param body - El buffer del archivo.
+   * @param contentType - El tipo MIME del archivo.
+   * @returns La URL pública del archivo en S3.
+   */
+  async uploadMediaBuffer(
+    key: string,
+    body: Buffer,
+    contentType: string,
+  ): Promise<string> {
+    try {
+      // Usamos el s3Service que ya está inyectado en este servicio
+      return this.s3Service.uploadMedia(key, body, contentType, body.length);
+    } catch (error) {
+      this.logger.error(
+        `Fallo al subir el buffer a S3 con la clave: ${key}`,
+        error as any,
+      );
+      throw new Error('Error al subir el archivo a S3.');
+    }
+  }
 }

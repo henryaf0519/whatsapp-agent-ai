@@ -81,6 +81,7 @@ interface payLoad {
   action?: string;
   mediaId?: string;
   mimeType?: string;
+  url?: string;
 }
 
 interface MessageContent {
@@ -88,7 +89,7 @@ interface MessageContent {
   body?: string;
   payload?: string;
   text?: string;
-  imageUrl?: string;
+  url?: string;
   caption?: string;
 }
 
@@ -265,6 +266,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         return Promise.resolve({
           type: 'image',
           text: imageUrl,
+          url: imageUrl,
         });
       } catch (error) {
         // Maneja errores si no se puede obtener la URL
@@ -278,6 +280,13 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         const { buffer, mimeType } = await this.whatsappService.downloadMedia(
           message.audio.id,
         );
+        const fileName = `audio/${message.from}/${message.id}.ogg`;
+        const audioUrl = await this.whatsappService.uploadMediaBuffer(
+          fileName,
+          buffer,
+          mimeType,
+        );
+        this.logger.log(`Audio subido a S3: ${audioUrl}`);
         const transcribedText = await this.transcriptionService.transcribeAudio(
           buffer,
           mimeType,
@@ -286,8 +295,9 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         this.logger.log(`Texto transcrito: "${transcribedText}"`);
         // Devolvemos un objeto de tipo 'text' con la transcripción
         return Promise.resolve({
-          type: 'text',
-          body: transcribedText,
+          type: 'audio',
+          text: transcribedText,
+          url: audioUrl,
         });
       } catch (error) {
         this.logger.error(
@@ -469,6 +479,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
     }
     // Validate message
     payload = this.createPayload(messageContent);
+    this.logger.debug('Payload:', JSON.stringify(payload, null, 2));
 
     if (payload && payload.type === 'unsupported') {
       this.logger.warn('Unsupported message type received', {
@@ -488,11 +499,13 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         message.id,
         'RECEIVED',
         payload?.type || '',
+        payload?.url || '',
       );
       const sendSocketUser = {
         from: message.from,
         text: payload?.text || '',
         type: payload?.type || 'text',
+        url: payload?.url || '',
         SK: `MESSAGE#${new Date().toISOString()}`,
       };
       this.socketGateway.sendNewMessageNotification(
@@ -529,7 +542,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
       const sendSocketIA = {
         from: 'IA',
         text: messageResp,
-        type: 'text',
+        type: reply.type,
         SK: `MESSAGE#${new Date().toISOString()}`,
       };
       this.socketGateway.sendNewMessageNotification(message.from, sendSocketIA);
@@ -603,8 +616,16 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         payload = {
           type: 'image',
           text: messageContent.text,
+          url: messageContent.text,
         };
         break;
+      case 'audio':
+        return {
+          type: 'audio',
+          text: messageContent.text,
+          url: messageContent.url,
+        };
+
       case 'unsupported':
       default:
         payload = { type: 'unsupported' };
