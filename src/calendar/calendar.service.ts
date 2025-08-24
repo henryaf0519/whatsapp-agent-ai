@@ -82,5 +82,4 @@ export class CalendarService {
       throw new InternalServerErrorException('Error inesperado creando evento');
     }
   }
-
 }
