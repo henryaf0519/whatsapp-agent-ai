@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import {
   Controller,
   Post,
@@ -12,16 +13,32 @@ import {
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
-import { PruebaService } from 'src/agent/agent.service';
+import { AgentOpenIaService } from 'src/agent/agent-open-ia/agent-open-ia.service';
+import { DynamoService } from 'src/database/dynamo/dynamo.service';
+import { SocketGateway } from 'src/socket/socket.gateway';
+import { TranscriptionService } from '../transcription/transcription.service';
 
 interface WhatsAppMessage {
-  from: string; // El número de teléfono del remitente
-  id: string; // ID único del mensaje de WhatsApp
-  timestamp: string; // Timestamp del mensaje
-  text?: { body: string }; // Contenido del mensaje de texto
-  type: string; // Tipo de mensaje (text, image, etc.)
+  from: string;
+  id: string;
+  timestamp: string;
+  text?: { body: string };
+  button?: {
+    payload: string;
+    text: string;
+  };
+  image?: {
+    caption?: string;
+    mime_type: string;
+    sha256: string;
+    id: string;
+  };
+  audio?: {
+    id: string;
+    mime_type: string;
+  };
+  type: string;
 }
-
 interface WhatsAppChange {
   value: {
     messaging_product: string;
@@ -45,7 +62,6 @@ interface WhatsAppChange {
   };
   field: string;
 }
-
 interface WhatsAppMessagePayload {
   object: string;
   entry: Array<{
@@ -59,6 +75,24 @@ interface ProcessedMessage {
   timestamp: number;
 }
 
+interface payLoad {
+  type: 'text' | 'button' | 'image' | 'audio' | 'unsupported';
+  text?: string;
+  action?: string;
+  mediaId?: string;
+  mimeType?: string;
+  url?: string;
+}
+
+interface MessageContent {
+  type: 'text' | 'button' | 'image' | 'audio' | 'unsupported';
+  body?: string;
+  payload?: string;
+  text?: string;
+  url?: string;
+  caption?: string;
+}
+
 @Controller('whatsapp')
 export class WhatsappWebhookController implements OnModuleDestroy {
   private readonly logger = new Logger(WhatsappWebhookController.name);
@@ -70,8 +104,11 @@ export class WhatsappWebhookController implements OnModuleDestroy {
 
   constructor(
     private readonly whatsappService: WhatsappService,
-    private readonly chatbotService: PruebaService,
+    private readonly chatbotService: AgentOpenIaService,
     private readonly configService: ConfigService,
+    private readonly dynamoService: DynamoService,
+    private readonly socketGateway: SocketGateway,
+    private readonly transcriptionService: TranscriptionService,
   ) {
     this.validateConfiguration();
     this.startCleanupInterval();
@@ -178,30 +215,105 @@ export class WhatsappWebhookController implements OnModuleDestroy {
     return payload as WhatsAppMessagePayload;
   }
 
-  private validateMessage(message: WhatsAppMessage): boolean {
+  private async validateMessage(
+    message: WhatsAppMessage,
+  ): Promise<MessageContent | null> {
     if (!message.from || !message.id) {
       this.logger.warn('Message missing required fields (from or id)', {
         message,
       });
-      return false;
+      return Promise.resolve(null);
     }
-
-    if (!message.text?.body || message.text.body.trim().length === 0) {
-      this.logger.debug('Message has no text content', {
+    this.logger.debug('Validating message', JSON.stringify(message, null, 2));
+    if (message.type === 'button' && message.button) {
+      this.logger.debug('Message is a button reply', {
         messageId: message.id,
+        payload: message.button.payload,
+        text: message.button.text,
       });
-      return false;
+      return Promise.resolve({
+        type: 'button',
+        payload: message.button.payload,
+        text: message.button.text,
+      });
     }
+    if (message.type === 'text' && message.text?.body) {
+      const textBody = message.text.body;
 
-    if (message.text.body.length > 4096) {
-      this.logger.warn('Message text too long', {
+      if (textBody.trim().length === 0 || textBody.length > 4096) {
+        this.logger.warn('Message text invalid (empty or too long)', {
+          messageId: message.id,
+          length: textBody.length,
+        });
+        return Promise.resolve({ type: 'unsupported' });
+      }
+
+      this.logger.debug('Message is a text message', {
         messageId: message.id,
-        length: message.text.body.length,
+        body: textBody,
       });
-      return false;
+      return Promise.resolve({
+        type: 'text',
+        body: textBody,
+      });
     }
+    if (message.type === 'image' && message.image?.id) {
+      try {
+        const imageUrl = await this.whatsappService.processAndUploadMedia(
+          message.image.id,
+          message.image.mime_type,
+        );
+        return Promise.resolve({
+          type: 'image',
+          text: imageUrl,
+          url: imageUrl,
+        });
+      } catch (error) {
+        // Maneja errores si no se puede obtener la URL
+        this.logger.error('Failed to get media URL', { error });
+        return Promise.resolve({ type: 'unsupported' });
+      }
+    }
+    if (message.type === 'audio' && message.audio?.id) {
+      try {
+        this.logger.log(`Procesando audio con mediaId: ${message.audio.id}`);
+        const { buffer, mimeType } = await this.whatsappService.downloadMedia(
+          message.audio.id,
+        );
+        const fileName = `audio/${message.from}/${message.id}.ogg`;
+        const audioUrl = await this.whatsappService.uploadMediaBuffer(
+          fileName,
+          buffer,
+          mimeType,
+        );
+        this.logger.log(`Audio subido a S3: ${audioUrl}`);
+        const transcribedText = await this.transcriptionService.transcribeAudio(
+          buffer,
+          mimeType,
+        );
 
-    return true;
+        this.logger.log(`Texto transcrito: "${transcribedText}"`);
+        // Devolvemos un objeto de tipo 'text' con la transcripción
+        return Promise.resolve({
+          type: 'audio',
+          text: transcribedText,
+          url: audioUrl,
+        });
+      } catch (error) {
+        this.logger.error(
+          'Error al procesar el audio en validateMessage',
+          error,
+        );
+        return Promise.resolve({ type: 'unsupported' });
+      }
+    }
+    this.logger.warn('Unsupported message type', {
+      messageId: message.id,
+      type: message.type,
+    });
+    return Promise.resolve({
+      type: 'unsupported',
+    });
   }
 
   @Get('webhook')
@@ -267,7 +379,6 @@ export class WhatsappWebhookController implements OnModuleDestroy {
     let processedMessages = 0;
 
     try {
-      // Validate payload structure
       const payload = this.validateWebhookPayload(req.body);
 
       // Process each entry
@@ -333,6 +444,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
   }
 
   private async processChange(change: WhatsAppChange): Promise<void> {
+    //this.logger.log('Processing change', JSON.stringify(change, null, 2));
     if (change.field !== 'messages') {
       return;
     }
@@ -341,7 +453,6 @@ export class WhatsappWebhookController implements OnModuleDestroy {
     if (!messages || messages.length === 0) {
       return;
     }
-
     // Process each message
     for (const message of messages) {
       try {
@@ -358,37 +469,99 @@ export class WhatsappWebhookController implements OnModuleDestroy {
   }
 
   private async processMessage(message: WhatsAppMessage): Promise<void> {
+    let payload: payLoad | undefined = undefined;
     if (this.isDuplicate(message.id)) {
       return;
     }
-
+    const messageContent = await this.validateMessage(message);
+    if (!messageContent) {
+      return;
+    }
     // Validate message
-    if (!this.validateMessage(message)) {
+    payload = this.createPayload(messageContent);
+    this.logger.debug('Payload:', JSON.stringify(payload, null, 2));
+
+    if (payload && payload.type === 'unsupported') {
+      this.logger.warn('Unsupported message type received', {
+        messageId: message.id,
+        type: message.type,
+      });
       return;
     }
 
     const threadId = this.generateThreadId(message.from);
-    const messageText = message.text!.body.trim();
 
     try {
-      // Get response from chatbot service
-      this.logger.log(`Processing message from ${message.from}`, {
-        messageId: message.id,
-        threadId,
-        text: messageText,
-      });
-      const reply = await this.chatbotService.conversar(threadId, messageText);
+      await this.dynamoService.saveMessage(
+        message.from,
+        message.from,
+        payload?.text || '',
+        message.id,
+        'RECEIVED',
+        payload?.type || '',
+        payload?.url || '',
+      );
+      const sendSocketUser = {
+        from: message.from,
+        text: payload?.text || '',
+        type: payload?.type || 'text',
+        url: payload?.url || '',
+        SK: `MESSAGE#${new Date().toISOString()}`,
+      };
+      this.socketGateway.sendNewMessageNotification(
+        message.from,
+        sendSocketUser,
+      );
+      await this.dynamoService.createOrUpdateChatMode(message.from, 'IA');
+      const chatMode = await this.dynamoService.getChatMode(message.from);
+      this.logger.debug('modo: ', chatMode);
+      if (chatMode && chatMode === 'humano') {
+        this.logger.log(
+          `Chat ${message.from} está en control humano. La IA no responderá.`,
+        );
+        return;
+      }
 
-      if (!reply || typeof reply !== 'string' || reply.trim().length === 0) {
+      const reply = await this.chatbotService.hablar(
+        threadId,
+        payload as payLoad,
+      );
+      const messageResp =
+        reply.type === 'plantilla'
+          ? (reply.template ?? '')
+          : (reply.text ?? '');
+
+      await this.dynamoService.saveMessage(
+        message.from,
+        'IA',
+        messageResp,
+        message.id,
+        'SEND',
+        reply.type,
+      );
+      const sendSocketIA = {
+        from: 'IA',
+        text: messageResp,
+        type: reply.type,
+        SK: `MESSAGE#${new Date().toISOString()}`,
+      };
+      this.socketGateway.sendNewMessageNotification(message.from, sendSocketIA);
+
+      if (!reply) {
         // Send a default error message
         const defaultReply =
           'Lo siento, no pude procesar tu mensaje en este momento. Por favor, intenta de nuevo.';
         await this.whatsappService.sendMessage(message.from, defaultReply);
         return;
       }
-
-      // Send response via WhatsApp
-      await this.whatsappService.sendMessage(message.from, reply);
+      if (reply.type === 'plantilla') {
+        await this.whatsappService.sendTemplateMessage(
+          message.from,
+          reply.template || '',
+        );
+      } else {
+        await this.whatsappService.sendMessage(message.from, reply.text ?? '');
+      }
     } catch (error) {
       this.logger.error(
         'Error processing message with chatbot or sending response',
@@ -415,6 +588,51 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         });
       }
     }
+  }
+
+  private createPayload(messageContent: MessageContent): any {
+    let payload: any;
+
+    this.logger.debug(
+      'messageContent: ',
+      JSON.stringify(messageContent, null, 2),
+    );
+
+    switch (messageContent.type) {
+      case 'button':
+        payload = {
+          type: 'button',
+          action: messageContent.payload,
+          text: messageContent.text,
+        };
+        break;
+      case 'text':
+        payload = {
+          type: 'text',
+          text: (messageContent.body ?? '').trim(),
+        };
+        break;
+      case 'image':
+        payload = {
+          type: 'image',
+          text: messageContent.text,
+          url: messageContent.text,
+        };
+        break;
+      case 'audio':
+        return {
+          type: 'audio',
+          text: messageContent.text,
+          url: messageContent.url,
+        };
+
+      case 'unsupported':
+      default:
+        payload = { type: 'unsupported' };
+        break;
+    }
+
+    return payload;
   }
 
   // Cleanup on module destroy

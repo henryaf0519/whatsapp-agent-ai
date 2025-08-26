@@ -1,7 +1,9 @@
-import { Controller, Body, Post, Get } from '@nestjs/common';
+import { Controller, Body, Post, Get, Param, UseGuards } from '@nestjs/common';
 import { DynamoService } from './dynamo.service';
+import { AuthGuard } from '@nestjs/passport';
 
 @Controller('dynamo')
+@UseGuards(AuthGuard('jwt'))
 export class DynamoController {
   constructor(private readonly dynamoService: DynamoService) {}
 
@@ -10,11 +12,29 @@ export class DynamoController {
     return this.dynamoService.guardarDato(payload);
   }
 
-  @Get()
-  async getHuecos(@Body() payload: Record<string, any>) {
-    return this.dynamoService.obtenerHuecosDisponibles(
-      payload.name,
-      payload.fecha,
+  @Get('conversations')
+  async getConversations() {
+    return this.dynamoService.getConversations();
+  }
+
+  @Get('messages/:conversationId')
+  getMessages(@Param('conversationId') conversationId: string) {
+    return this.dynamoService.getMessages(conversationId);
+  }
+
+  @Post('control/:conversationId')
+  updateChatMode(
+    @Param('conversationId') conversationId: string,
+    @Body('newMode') newMode: 'IA' | 'humano',
+  ) {
+    return this.dynamoService.updateChatMode(conversationId, newMode);
+  }
+
+  @Post('message')
+  handleAgentMessage(@Body() body: { conversationId: string; text: string }) {
+    return this.dynamoService.handleAgentMessage(
+      body.conversationId,
+      body.text,
     );
   }
 }
