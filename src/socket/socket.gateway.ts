@@ -20,6 +20,7 @@ export interface MessagePayload {
   from: string;
   text: string;
   SK: string;
+  url?: string;
   // Agrega aquí otros campos que pueda tener tu mensaje.
 }
 
@@ -42,7 +43,6 @@ export class SocketGateway
     message: MessagePayload,
   ): void {
     this.logger.log(`Emitiendo 'newMessage' para el chat: ${conversationId}`);
-    // Emite el evento solo a los clientes suscritos al chat (room) específico.
     this.server.to(conversationId).emit('newMessage', message);
     this.server.emit('newNotification', { conversationId, message });
   }

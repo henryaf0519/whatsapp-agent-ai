@@ -5,7 +5,7 @@
 /* eslint-disable @typescript-eslint/require-await */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable, Logger } from '@nestjs/common';
-import { DynamoDBClient, WriteRequest } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { ConfigService } from '@nestjs/config';
 import {
   BatchWriteCommand,
@@ -20,7 +20,6 @@ import moment from 'moment-timezone';
 import { v4 as uuidv4 } from 'uuid';
 import { normalizeString } from '../../utils/utils';
 import { WhatsappService } from '../../whatsapp/whatsapp.service';
-import * as bcrypt from 'bcrypt';
 
 interface AgentScheduleItem {
   id: string;
@@ -496,21 +495,28 @@ export class DynamoService {
     messageId: string,
     status: string,
     type: string,
+    url?: string,
   ): Promise<any> {
-    // Generamos la clave de ordenación (SK) con un timestamp para el orden cronológico
     const timestamp = new Date().toISOString();
+    const item: any = {
+      PK: `CONVERSATION#${conversationId}`,
+      SK: `MESSAGE#${timestamp}`,
+      from: from,
+      type: type,
+      text: text,
+      id_mensaje_wa: messageId,
+      estado: status,
+    };
+
+    if (url) {
+      item.url = url;
+    }
+
+    this.logger.debug('guardando informacion del mensaje: ', item);
 
     const command = new PutCommand({
       TableName: 'ConversationsTable',
-      Item: {
-        PK: `CONVERSATION#${conversationId}`, // La clave de partición agrupa la conversación
-        SK: `MESSAGE#${timestamp}`, // La clave de ordenación para el orden
-        from: from,
-        type: type,
-        text: text,
-        id_mensaje_wa: messageId,
-        estado: status,
-      },
+      Item: item,
     });
 
     try {

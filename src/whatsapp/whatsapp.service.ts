@@ -496,4 +496,63 @@ export class WhatsappService {
       );
     }
   }
+
+  async downloadMedia(
+    mediaId: string,
+  ): Promise<{ buffer: Buffer; mimeType: string }> {
+    this.logger.log(`Obteniendo URL para mediaId: ${mediaId}`);
+
+    // 1. Obtener la URL del medio
+    const urlResponse = await axios.get(
+      `https://graph.facebook.com/v20.0/${mediaId}`,
+      {
+        headers: { Authorization: `Bearer ${this.whatsappToken}` },
+      },
+    );
+    const mediaUrl = urlResponse.data.url;
+
+    if (!mediaUrl) {
+      throw new Error('No se pudo obtener la URL del medio.');
+    }
+
+    // 2. Descargar el archivo
+    this.logger.log(`Descargando medio desde: ${mediaUrl}`);
+    const downloadResponse = await axios.get(mediaUrl, {
+      headers: { Authorization: `Bearer ${this.whatsappToken}` },
+      responseType: 'stream',
+    });
+
+    const buffer = await this.streamToBuffer(downloadResponse.data);
+    const mimeType = downloadResponse.headers['content-type'];
+
+    this.logger.log(
+      `Medio descargado. Tamaño: ${buffer.length} bytes, Tipo: ${mimeType}`,
+    );
+
+    return { buffer, mimeType };
+  }
+
+  /**
+   * Sube un buffer de un archivo multimedia directamente a S3.
+   * @param key - La ruta y nombre del archivo en S3 (ej. 'audio/user-id/message-id.ogg')
+   * @param body - El buffer del archivo.
+   * @param contentType - El tipo MIME del archivo.
+   * @returns La URL pública del archivo en S3.
+   */
+  async uploadMediaBuffer(
+    key: string,
+    body: Buffer,
+    contentType: string,
+  ): Promise<string> {
+    try {
+      // Usamos el s3Service que ya está inyectado en este servicio
+      return this.s3Service.uploadMedia(key, body, contentType, body.length);
+    } catch (error) {
+      this.logger.error(
+        `Fallo al subir el buffer a S3 con la clave: ${key}`,
+        error as any,
+      );
+      throw new Error('Error al subir el archivo a S3.');
+    }
+  }
 }

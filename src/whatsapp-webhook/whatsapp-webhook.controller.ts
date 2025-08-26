@@ -16,6 +16,7 @@ import { ConfigService } from '@nestjs/config';
 import { AgentOpenIaService } from 'src/agent/agent-open-ia/agent-open-ia.service';
 import { DynamoService } from 'src/database/dynamo/dynamo.service';
 import { SocketGateway } from 'src/socket/socket.gateway';
+import { TranscriptionService } from '../transcription/transcription.service';
 
 interface WhatsAppMessage {
   from: string;
@@ -31,6 +32,10 @@ interface WhatsAppMessage {
     mime_type: string;
     sha256: string;
     id: string;
+  };
+  audio?: {
+    id: string;
+    mime_type: string;
   };
   type: string;
 }
@@ -71,17 +76,20 @@ interface ProcessedMessage {
 }
 
 interface payLoad {
-  type: 'text' | 'button' | 'image' | 'unsupported';
+  type: 'text' | 'button' | 'image' | 'audio' | 'unsupported';
   text?: string;
   action?: string;
+  mediaId?: string;
+  mimeType?: string;
+  url?: string;
 }
 
 interface MessageContent {
-  type: 'text' | 'button' | 'image' | 'unsupported';
+  type: 'text' | 'button' | 'image' | 'audio' | 'unsupported';
   body?: string;
   payload?: string;
   text?: string;
-  imageUrl?: string;
+  url?: string;
   caption?: string;
 }
 
@@ -100,6 +108,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
     private readonly configService: ConfigService,
     private readonly dynamoService: DynamoService,
     private readonly socketGateway: SocketGateway,
+    private readonly transcriptionService: TranscriptionService,
   ) {
     this.validateConfiguration();
     this.startCleanupInterval();
@@ -257,10 +266,44 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         return Promise.resolve({
           type: 'image',
           text: imageUrl,
+          url: imageUrl,
         });
       } catch (error) {
         // Maneja errores si no se puede obtener la URL
         this.logger.error('Failed to get media URL', { error });
+        return Promise.resolve({ type: 'unsupported' });
+      }
+    }
+    if (message.type === 'audio' && message.audio?.id) {
+      try {
+        this.logger.log(`Procesando audio con mediaId: ${message.audio.id}`);
+        const { buffer, mimeType } = await this.whatsappService.downloadMedia(
+          message.audio.id,
+        );
+        const fileName = `audio/${message.from}/${message.id}.ogg`;
+        const audioUrl = await this.whatsappService.uploadMediaBuffer(
+          fileName,
+          buffer,
+          mimeType,
+        );
+        this.logger.log(`Audio subido a S3: ${audioUrl}`);
+        const transcribedText = await this.transcriptionService.transcribeAudio(
+          buffer,
+          mimeType,
+        );
+
+        this.logger.log(`Texto transcrito: "${transcribedText}"`);
+        // Devolvemos un objeto de tipo 'text' con la transcripción
+        return Promise.resolve({
+          type: 'audio',
+          text: transcribedText,
+          url: audioUrl,
+        });
+      } catch (error) {
+        this.logger.error(
+          'Error al procesar el audio en validateMessage',
+          error,
+        );
         return Promise.resolve({ type: 'unsupported' });
       }
     }
@@ -436,6 +479,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
     }
     // Validate message
     payload = this.createPayload(messageContent);
+    this.logger.debug('Payload:', JSON.stringify(payload, null, 2));
 
     if (payload && payload.type === 'unsupported') {
       this.logger.warn('Unsupported message type received', {
@@ -455,11 +499,13 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         message.id,
         'RECEIVED',
         payload?.type || '',
+        payload?.url || '',
       );
       const sendSocketUser = {
         from: message.from,
         text: payload?.text || '',
         type: payload?.type || 'text',
+        url: payload?.url || '',
         SK: `MESSAGE#${new Date().toISOString()}`,
       };
       this.socketGateway.sendNewMessageNotification(
@@ -496,7 +542,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
       const sendSocketIA = {
         from: 'IA',
         text: messageResp,
-        type: 'text',
+        type: reply.type,
         SK: `MESSAGE#${new Date().toISOString()}`,
       };
       this.socketGateway.sendNewMessageNotification(message.from, sendSocketIA);
@@ -570,8 +616,16 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         payload = {
           type: 'image',
           text: messageContent.text,
+          url: messageContent.text,
         };
         break;
+      case 'audio':
+        return {
+          type: 'audio',
+          text: messageContent.text,
+          url: messageContent.url,
+        };
+
       case 'unsupported':
       default:
         payload = { type: 'unsupported' };

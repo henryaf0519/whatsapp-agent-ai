@@ -16,6 +16,7 @@ import { SemanticCacheService } from './semantic-cache/semantic-cache.service';
 import { SocketGateway } from './socket/socket.gateway';
 import { AuthModule } from './auth/auth.module';
 import { WhatsappModule } from './whatsapp/whatsapp.module';
+import { TranscriptionModule } from './transcription/transcription.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { WhatsappModule } from './whatsapp/whatsapp.module';
     ConversationLogModule,
     AuthModule,
     WhatsappModule,
+    TranscriptionModule,
   ],
   controllers: [
     AppController,
