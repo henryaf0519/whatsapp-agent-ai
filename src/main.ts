@@ -6,8 +6,23 @@ declare const module: any;
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  const whitelist = [
+    'http://localhost:5173',
+    'https://orvexchat-666d6.web.app',
+  ];
   app.enableCors({
-    origin: 'http://localhost:5173', // Para desarrollo. Usa el dominio específico en producción.
+    origin: function (
+      origin: string | undefined,
+      callback: (err: Error | null, allow?: boolean) => void,
+    ) {
+      // Permitir solicitudes sin origen (como Postman o peticiones de servidor a servidor)
+      // o si el origen está en nuestra lista blanca.
+      if (!origin || whitelist.indexOf(origin) !== -1) {
+        callback(null, true);
+      } else {
+        callback(new Error('No permitido por CORS'));
+      }
+    },
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
   });
