@@ -6,7 +6,7 @@ declare const module: any;
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  const whitelist = [
+  /*  const whitelist = [
     'http://localhost:5173', // Tu entorno de desarrollo
     'https://orvexchat-666d6.web.app', // Tu entorno de producción
   ];
@@ -24,7 +24,7 @@ async function bootstrap() {
     },
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
-  });
+  });*/
   app.use(cookieParser());
   await app.listen(process.env.PORT ?? 3000);
   // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
