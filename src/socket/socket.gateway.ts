@@ -25,9 +25,6 @@ export interface MessagePayload {
 }
 
 @WebSocketGateway({
-  cors: {
-    origin: '*', // Permite conexiones desde cualquier origen. En producción, usa la URL de tu front-end.
-  },
   path: '/socket', // Define una ruta específica para el WebSocket
 })
 export class SocketGateway
