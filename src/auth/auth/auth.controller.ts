@@ -37,6 +37,7 @@ export class AuthController {
       httpOnly: true,
       secure: true,
       sameSite: 'none',
+      domain: 'orvexchat-666d6.web.app',
       path: '/',
       expires: new Date(Date.now() + 24 * 60 * 60 * 1000),
     });
