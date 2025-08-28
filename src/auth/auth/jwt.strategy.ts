@@ -16,11 +16,11 @@ const cookieExtractor = (req: Request): string | null => {
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-  constructor() {
+  constructor(private readonly config: { get: (key: string) => string }) {
     super({
       jwtFromRequest: cookieExtractor,
       ignoreExpiration: false,
-      secretOrKey: process.env.JWT_SECRET || 'TU_SECRETO_SUPER_SEGURO',
+      secretOrKey: config.get('JWT_SECRET') || 'TU_SECRETO_SUPER_SEGURO',
     });
   }
 
