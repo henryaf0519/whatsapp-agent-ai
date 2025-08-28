@@ -26,6 +26,11 @@ export interface MessagePayload {
 
 @WebSocketGateway({
   path: '/socket', // Define una ruta específica para el WebSocket
+  cors: {
+    origin: 'http://localhost:5174', // Origen permitido
+    methods: ['GET', 'POST'],
+    credentials: true,
+  },
 })
 export class SocketGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect

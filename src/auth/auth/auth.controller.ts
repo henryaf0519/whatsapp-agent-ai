@@ -7,7 +7,6 @@ import {
   HttpCode,
   HttpStatus,
   UnauthorizedException,
-  Res,
   Get,
   UseGuards,
   Req,
@@ -25,7 +24,6 @@ export class AuthController {
   async login(
     @Body('email') email: string,
     @Body('password') password: string,
-    @Res({ passthrough: true }) res: Response,
   ) {
     const user = await this.authService.validateUser(email, password);
 
@@ -33,14 +31,8 @@ export class AuthController {
       throw new UnauthorizedException('Credenciales inválidas');
     }
     const loginData = await this.authService.login(user);
-    res.cookie('accessToken', loginData.access_token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      path: '/',
-      expires: new Date(Date.now() + 24 * 60 * 60 * 1000),
-    });
     return {
+      accessToken: loginData.access_token,
       templates: loginData.templates,
       userData: loginData.user,
     };
