@@ -8,15 +8,22 @@ import { JwtModule } from '@nestjs/jwt';
 import { WhatsappModule } from 'src/whatsapp/whatsapp.module';
 import { PassportModule } from '@nestjs/passport';
 import { JwtStrategy } from './auth/jwt.strategy';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 
 @Module({
   imports: [
+    ConfigModule,
     WhatsappModule,
     DatabaseModule,
     PassportModule,
-    JwtModule.register({
-      secret: process.env.JWT_SECRET || 'TU_SECRETO_SUPER_SEGURO',
-      signOptions: { expiresIn: '1h' },
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        secret:
+          configService.get<string>('JWT_SECRET') || 'TU_SECRETO_SUPER_SEGURO',
+        signOptions: { expiresIn: '1h' },
+      }),
     }),
   ],
   providers: [AuthService, JwtStrategy],
