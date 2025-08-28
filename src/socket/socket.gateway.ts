@@ -25,9 +25,6 @@ export interface MessagePayload {
 }
 
 @WebSocketGateway({
-  cors: {
-    origin: 'https://orvexchat-666d6.web.app',
-  },
   path: '/socket',
 })
 export class SocketGateway
