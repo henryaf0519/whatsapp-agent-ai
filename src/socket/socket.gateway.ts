@@ -23,11 +23,22 @@ export interface MessagePayload {
   url?: string;
   // Agrega aquí otros campos que pueda tener tu mensaje.
 }
+const allowedOrigins = [
+  'http://localhost:5174', // Para desarrollo
+  'https://orvexchat-666d6.web.app', // Para producción en Firebase
+];
 
 @WebSocketGateway({
-  path: '/socket', // Define una ruta específica para el WebSocket
+  path: '/socket',
   cors: {
-    origin: 'http://localhost:5174', // Origen permitido
+    // ✅ Configuración dinámica también aquí
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     methods: ['GET', 'POST'],
     credentials: true,
   },
