@@ -13,7 +13,9 @@ export class BulkMessagingService {
   constructor(
     private readonly dynamoService: DynamoService,
     private readonly whatsappService: WhatsappService,
-  ) {}
+  ) {
+    this.logger.log(`¡BulkMessagingService inicializado! ID de instancia: `);
+  }
 
   async createSchedule(
     dto: CreateScheduleDto,
