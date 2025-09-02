@@ -7,6 +7,7 @@ import { AppModule } from './app.module';
 import 'reflect-metadata';
 import cookieParser from 'cookie-parser';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import { ValidationPipe } from '@nestjs/common';
 declare const module: any;
 
 // ✅ Define una lista de orígenes permitidos
@@ -30,7 +31,7 @@ async function bootstrap() {
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
   });
-
+  app.useGlobalPipes(new ValidationPipe());
   app.set('trust proxy', 1);
   app.use(cookieParser());
   await app.listen(process.env.PORT ?? 3000);
