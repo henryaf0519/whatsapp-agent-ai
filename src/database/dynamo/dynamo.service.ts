@@ -21,6 +21,7 @@ import moment from 'moment-timezone';
 import { v4 as uuidv4 } from 'uuid';
 import { normalizeString } from '../../utils/utils';
 import { WhatsappService } from '../../whatsapp/whatsapp.service';
+import cronParser from 'cron-parser';
 
 interface AgentScheduleItem {
   id: string;
@@ -881,33 +882,58 @@ export class DynamoService {
   async getDueSchedules(now: Date): Promise<any[]> {
     const command = new ScanCommand({
       TableName: 'MessageSchedules',
-      FilterExpression:
-        'isActive = :true and ((scheduleType = :once and sendAt <= :now) or (scheduleType = :recurring))',
-      ExpressionAttributeValues: {
-        ':true': true,
-        ':now': now.toISOString(),
-        ':once': 'once',
-        ':recurring': 'recurring',
-      },
+      FilterExpression: 'isActive = :true',
+      ExpressionAttributeValues: { ':true': true },
     });
     const { Items } = await this.docClient.send(command);
 
-    // Filtrado adicional para cron jobs
-    const dueSchedules = (Items || []).filter((item) => {
-      if (item.scheduleType === 'once') {
-        return true;
+    if (!Items || Items.length === 0) {
+      return [];
+    }
+
+    // ✅ 1. Importamos la librería dinámicamente DENTRO de la función.
+    //    Esto devuelve una promesa, por eso usamos 'await'.
+    const cronParser = await import('cron-parser');
+
+    const dueSchedules = Items.filter((schedule) => {
+      // ... (lógica para 'once' se mantiene igual)
+      if (schedule.scheduleType === 'once' && schedule.sendAt) {
+        const sendAtDate = new Date(schedule.sendAt);
+        return (
+          sendAtDate.getFullYear() === now.getFullYear() &&
+          sendAtDate.getMonth() === now.getMonth() &&
+          sendAtDate.getDate() === now.getDate() &&
+          sendAtDate.getHours() === now.getHours() &&
+          sendAtDate.getMinutes() === now.getMinutes()
+        );
       }
-      if (item.scheduleType === 'recurring' && item.cronExpression) {
-        // Aquí puedes añadir una librería como 'cron-parser' para una validación más robusta
-        // Por simplicidad, este ejemplo no lo incluye, pero es recomendable.
-        return true; // Simplificado: asume que debe correr
+
+      if (schedule.scheduleType === 'recurring' && schedule.cronExpression) {
+        try {
+          const interval = cronParser.parseExpression(schedule.cronExpression, {
+            currentDate: now,
+            tz: 'America/Bogota', // ajusta tu zona horaria
+          });
+          // Obtenemos la fecha de la última ejecución
+          const prev = interval.prev().toDate();
+          console.log('interval', prev);
+          // Si la diferencia es <= 60 segundos, significa que el cron "cayó" en este minuto
+          const diff = Math.abs(now.getTime() - prev.getTime());
+          return diff < 60 * 1000;
+        } catch (err) {
+          this.logger.error(
+            `Expresión CRON inválida para scheduleId ${schedule.scheduleId}: "${schedule.cronExpression}"`,
+            err,
+          );
+          return false;
+        }
       }
+
       return false;
     });
 
     return dueSchedules;
   }
-
   async deactivateSchedule(scheduleId: string): Promise<any> {
     const command = new UpdateCommand({
       TableName: 'MessageSchedules',

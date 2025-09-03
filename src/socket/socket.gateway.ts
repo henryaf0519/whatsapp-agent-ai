@@ -24,7 +24,7 @@ export interface MessagePayload {
   // Agrega aquí otros campos que pueda tener tu mensaje.
 }
 const allowedOrigins = [
-  'http://localhost:5174', // Para desarrollo
+  'http://localhost:5173', // Para desarrollo
   'https://orvexchat-666d6.web.app', // Para producción en Firebase
 ];
 
