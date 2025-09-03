@@ -891,13 +891,9 @@ export class DynamoService {
       return [];
     }
 
-    // ✅ 1. Importamos la librería dinámicamente DENTRO de la función.
-    //    Esto devuelve una promesa, por eso usamos 'await'.
-    const cronParser = await import('cron-parser');
-
     const dueSchedules = Items.filter((schedule) => {
-      // ... (lógica para 'once' se mantiene igual)
       if (schedule.scheduleType === 'once' && schedule.sendAt) {
+        // 1. Leemos la fecha UTC y la convertimos a un objeto Moment en la zona de Bogotá
         const sendAtDate = new Date(schedule.sendAt);
         return (
           sendAtDate.getFullYear() === now.getFullYear() &&
@@ -911,15 +907,17 @@ export class DynamoService {
       if (schedule.scheduleType === 'recurring' && schedule.cronExpression) {
         try {
           const interval = cronParser.parseExpression(schedule.cronExpression, {
-            currentDate: now,
-            tz: 'America/Bogota', // ajusta tu zona horaria
+            currentDate: new Date(now.getTime() - 60000),
+            tz: 'America/Bogota',
           });
-          // Obtenemos la fecha de la última ejecución
-          const prev = interval.prev().toDate();
-          console.log('interval', prev);
-          // Si la diferencia es <= 60 segundos, significa que el cron "cayó" en este minuto
-          const diff = Math.abs(now.getTime() - prev.getTime());
-          return diff < 60 * 1000;
+          const next = interval.next().toDate();
+          return (
+            next.getFullYear() === now.getFullYear() &&
+            next.getMonth() === now.getMonth() &&
+            next.getDate() === now.getDate() &&
+            next.getHours() === now.getHours() &&
+            next.getMinutes() === now.getMinutes()
+          );
         } catch (err) {
           this.logger.error(
             `Expresión CRON inválida para scheduleId ${schedule.scheduleId}: "${schedule.cronExpression}"`,

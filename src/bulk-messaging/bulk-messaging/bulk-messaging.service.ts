@@ -5,6 +5,7 @@ import { DynamoService } from '../../database/dynamo/dynamo.service';
 import { WhatsappService } from '../../whatsapp/whatsapp.service';
 import { CreateScheduleDto } from '../dto/create-schedule.dto';
 import { v4 as uuidv4 } from 'uuid';
+import { Console } from 'console';
 
 @Injectable()
 export class BulkMessagingService {
@@ -21,13 +22,19 @@ export class BulkMessagingService {
     dto: CreateScheduleDto,
   ): Promise<{ scheduleId: string; [key: string]: any }> {
     const scheduleId = uuidv4();
+    let finalSendAt = dto.sendAt;
+    if (dto.scheduleType === 'once' && dto.sendAt) {
+      const localDateString = dto.sendAt.replace('Z', '');
+      const localDate = new Date(localDateString);
+      finalSendAt = localDate.toISOString();
+    }
     const schedule = {
       scheduleId,
       ...dto,
+      sendAt: finalSendAt,
       createdAt: new Date().toISOString(),
       isActive: true,
     };
-
     return this.dynamoService.saveMessageSchedule(schedule) as Promise<{
       scheduleId: string;
       [key: string]: any;
@@ -61,6 +68,13 @@ export class BulkMessagingService {
       [key: string]: any;
     }> = await this.dynamoService.getDueSchedules(now);
 
+    if (schedules.length === 0) {
+      this.logger.log(
+        'No hay mensajes programados para enviar en este momento.',
+      );
+      return;
+    }
+    console.log('Schedules to process:', schedules);
     for (const schedule of schedules) {
       this.logger.log(`Enviando mensaje programado: ${schedule.name}`);
       for (const phoneNumber of schedule.phoneNumbers) {
