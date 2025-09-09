@@ -49,10 +49,10 @@ export class DynamoController {
   @UseGuards(AuthGuard('jwt'))
   @Get('contacts')
   async getContacts(@Req() req: Request) {
-    const user = req.user as { waba_id: string };
-    if (!user || !user.waba_id) {
+    const user = req.user as { number_id: string } | undefined;
+    if (!user || !user.number_id) {
       throw new Error('waba_id no encontrado en el token del usuario.');
     }
-    return this.dynamoService.getContactsForBusiness(user.waba_id);
+    return this.dynamoService.getContactsForBusiness(user.number_id);
   }
 }
