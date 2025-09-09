@@ -1,5 +1,15 @@
-import { Controller, Body, Post, Get, Param } from '@nestjs/common';
+import {
+  Controller,
+  Body,
+  Post,
+  Get,
+  Param,
+  UseGuards,
+  Req,
+} from '@nestjs/common';
 import { DynamoService } from './dynamo.service';
+import { AuthGuard } from '@nestjs/passport';
+import { Request } from 'express';
 
 @Controller('dynamo')
 export class DynamoController {
@@ -34,5 +44,15 @@ export class DynamoController {
       body.conversationId,
       body.text,
     );
+  }
+
+  @UseGuards(AuthGuard('jwt'))
+  @Get('contacts')
+  async getContacts(@Req() req: Request) {
+    const user = req.user as { waba_id: string };
+    if (!user || !user.waba_id) {
+      throw new Error('waba_id no encontrado en el token del usuario.');
+    }
+    return this.dynamoService.getContactsForBusiness(user.waba_id);
   }
 }

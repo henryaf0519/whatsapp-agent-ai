@@ -671,14 +671,20 @@ export class DynamoService {
   }
 
   async createOrUpdateChatMode(
+    businessId: string,
+    contactName: string,
     conversationId: string,
     modo: 'IA' | 'humano' = 'IA',
   ): Promise<void> {
     const command = new PutCommand({
       TableName: 'ChatControl',
       Item: {
+        businessId,
+        contactName,
         conversationId,
         modo,
+        name: contactName,
+        createdAt: new Date().toISOString(),
       },
       // ✅ La clave de la solución: Condición para que solo se cree si no existe
       ConditionExpression: 'attribute_not_exists(conversationId)',
@@ -700,6 +706,25 @@ export class DynamoService {
         console.error('Error al crear/actualizar el modo del chat:', error);
         throw error;
       }
+    }
+  }
+
+  async getContactsForBusiness(businessId: string): Promise<any[]> {
+    const command = new QueryCommand({
+      TableName: 'ChatControl',
+      IndexName: 'businessId-index',
+      KeyConditionExpression: 'businessId = :businessId',
+      ExpressionAttributeValues: {
+        ':businessId': businessId,
+      },
+    });
+
+    try {
+      const { Items } = await this.docClient.send(command);
+      return Items || [];
+    } catch (error) {
+      this.logger.error(`Error obteniendo contactos para ${businessId}`, error);
+      return [];
     }
   }
 
@@ -730,13 +755,14 @@ export class DynamoService {
     passwordHashed: string,
     waba_id: string,
     whatsapp_token: string,
+    number_id: string,
   ): Promise<any> {
     const command = new PutCommand({
       TableName: 'login',
       Item: {
         email: email,
         password: passwordHashed,
-        // ✅ CAMPOS NUEVOS AÑADIDOS AL ITEM
+        number_id: number_id,
         waba_id: waba_id,
         whatsapp_token: whatsapp_token,
       },

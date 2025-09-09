@@ -26,7 +26,7 @@ export class AuthController {
     @Body('password') password: string,
   ) {
     const user = await this.authService.validateUser(email, password);
-
+    console.log('user: ', user);
     if (!user) {
       throw new UnauthorizedException('Credenciales inválidas');
     }
@@ -44,6 +44,7 @@ export class AuthController {
     @Body('email') email: string,
     @Body('password') password: string,
     @Body('waba_id') waba_id: string,
+    @Body('number_id') number_id: string,
     @Body('whatsapp_token') whatsapp_token: string,
   ) {
     // ✅ PASAMOS LOS NUEVOS CAMPOS AL SERVICIO
@@ -52,6 +53,7 @@ export class AuthController {
       password,
       waba_id,
       whatsapp_token,
+      number_id,
     );
     return {
       message: 'Usuario registrado con éxito',

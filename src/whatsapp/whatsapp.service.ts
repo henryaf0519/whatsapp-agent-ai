@@ -466,7 +466,7 @@ export class WhatsappService {
     try {
       const response = await axios.get(url, {
         headers: {
-          Authorization: `Bearer ${token}`, // <-- USA EL TOKEN DEL USUARIO
+          Authorization: `Bearer ${token}`,
         },
         params: {
           fields: 'name,components,language,status,category', // Campos que queremos obtener

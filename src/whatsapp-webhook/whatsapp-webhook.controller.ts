@@ -448,7 +448,13 @@ export class WhatsappWebhookController implements OnModuleDestroy {
     if (change.field !== 'messages') {
       return;
     }
-
+    this.logger.log(
+      'New message change detected',
+      JSON.stringify(change, null, 2),
+    );
+    const businessId = change.value.metadata.phone_number_id;
+    const contact = change.value.contacts?.[0];
+    const contactName = contact?.profile?.name || 'Desconocido';
     const messages = change.value.messages;
     if (!messages || messages.length === 0) {
       return;
@@ -456,7 +462,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
     // Process each message
     for (const message of messages) {
       try {
-        await this.processMessage(message);
+        await this.processMessage(message, businessId, contactName);
       } catch (error) {
         this.logger.error('Error processing individual message', {
           messageId: message.id,
@@ -468,7 +474,11 @@ export class WhatsappWebhookController implements OnModuleDestroy {
     }
   }
 
-  private async processMessage(message: WhatsAppMessage): Promise<void> {
+  private async processMessage(
+    message: WhatsAppMessage,
+    businessId: string,
+    contactName: string,
+  ): Promise<void> {
     let payload: payLoad | undefined = undefined;
     if (this.isDuplicate(message.id)) {
       return;
@@ -477,6 +487,11 @@ export class WhatsappWebhookController implements OnModuleDestroy {
     if (!messageContent) {
       return;
     }
+
+    this.logger.log('Processing message', {
+      businessId,
+      contactName,
+    });
     // Validate message
     payload = this.createPayload(messageContent);
     this.logger.debug('Payload:', JSON.stringify(payload, null, 2));
@@ -512,7 +527,12 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         message.from,
         sendSocketUser,
       );
-      await this.dynamoService.createOrUpdateChatMode(message.from, 'IA');
+      await this.dynamoService.createOrUpdateChatMode(
+        businessId,
+        contactName,
+        message.from,
+        'IA',
+      );
       const chatMode = await this.dynamoService.getChatMode(message.from);
       this.logger.debug('modo: ', chatMode);
       if (chatMode && chatMode === 'humano') {
