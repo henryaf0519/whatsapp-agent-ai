@@ -67,7 +67,6 @@ export class SocketGateway
     this.logger.log(`Cliente desconectado: ${client.id}`);
   }
 
-
   @SubscribeMessage('subscribeToChat')
   handleSubscribe(
     @ConnectedSocket() client: Socket,
