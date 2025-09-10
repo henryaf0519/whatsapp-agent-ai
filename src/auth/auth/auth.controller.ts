@@ -63,7 +63,7 @@ export class AuthController {
 
   @Get('profile')
   @UseGuards(AuthGuard('jwt'))
-  getProfile(@Req() req: Request) {
+  getProfile(@Req() req: import('express').Request) {
     const userFromJwt = req.user as {
       userId: string;
       email: string;

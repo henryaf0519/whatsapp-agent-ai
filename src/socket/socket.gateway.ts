@@ -15,23 +15,20 @@ import {
 import { Server, Socket } from 'socket.io';
 import { Logger } from '@nestjs/common';
 
-// Es una buena práctica definir una interfaz para la carga útil de tus mensajes.
 export interface MessagePayload {
   from: string;
   text: string;
   SK: string;
   url?: string;
-  // Agrega aquí otros campos que pueda tener tu mensaje.
 }
 const allowedOrigins = [
-  'http://localhost:5173', // Para desarrollo
-  'https://orvexchat-666d6.web.app', // Para producción en Firebase
+  'http://localhost:5173',
+  'https://orvexchat-666d6.web.app',
 ];
 
 @WebSocketGateway({
   path: '/socket',
   cors: {
-    // ✅ Configuración dinámica también aquí
     origin: (origin, callback) => {
       if (!origin || allowedOrigins.indexOf(origin) !== -1) {
         callback(null, true);
@@ -49,8 +46,6 @@ export class SocketGateway
   @WebSocketServer() server!: Server;
   private readonly logger = new Logger(SocketGateway.name);
 
-  // Método para enviar una notificación de nuevo mensaje.
-  // Este método será llamado por tu DynamoController.
   public sendNewMessageNotification(
     conversationId: string,
     message: MessagePayload,
@@ -60,7 +55,6 @@ export class SocketGateway
     this.server.emit('newNotification', { conversationId, message });
   }
 
-  // Métodos del ciclo de vida del Gateway
   afterInit(server: Server): void {
     this.logger.log('WebSocket Gateway inicializado.');
   }
@@ -73,7 +67,7 @@ export class SocketGateway
     this.logger.log(`Cliente desconectado: ${client.id}`);
   }
 
-  // Puedes crear un método para suscribir a un cliente a un chat específico si lo necesitas.
+
   @SubscribeMessage('subscribeToChat')
   handleSubscribe(
     @ConnectedSocket() client: Socket,

@@ -2,12 +2,12 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 // src/main.ts
 
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import 'reflect-metadata';
 import cookieParser from 'cookie-parser';
-import { NestExpressApplication } from '@nestjs/platform-express';
-import { Logger, ValidationPipe } from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
 declare const module: any;
 
 const allowedOrigins = [
@@ -17,7 +17,6 @@ const allowedOrigins = [
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
-  const logger = new Logger('Bootstrap');
 
   app.enableCors({
     origin: (origin, callback) => {
@@ -31,7 +30,7 @@ async function bootstrap() {
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
   });
-  logger.log(`CORS habilitado para: ${allowedOrigins.join(', ')}`);
+
   app.useGlobalPipes(new ValidationPipe());
   app.set('trust proxy', 1);
   app.use(cookieParser());
