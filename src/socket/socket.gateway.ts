@@ -52,12 +52,16 @@ export class SocketGateway
     message: MessagePayload,
   ): void {
     this.logger.log(
-      `Emitiendo 'newNotification' para la empresa: ${businessId}`,
+      `Emitiendo 'newNotification' para la empresa: ${businessId}, mensaje: ${JSON.stringify(message)}`,
     );
     // Emitimos el evento a la sala de la empresa
     this.server
       .to(businessId)
       .emit('newNotification', { conversationId, message });
+
+    this.server
+      .to(`${businessId}#${conversationId}`)
+      .emit('newMessage', message);
   }
 
   public sendNewMessageToConversation(

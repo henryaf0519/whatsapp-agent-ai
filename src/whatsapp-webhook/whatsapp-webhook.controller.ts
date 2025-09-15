@@ -524,10 +524,6 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         message.from,
         sendSocketUser,
       );
-      this.socketGateway.sendNewMessageToConversation(
-        message.from,
-        sendSocketUser,
-      );
       await this.dynamoService.createOrUpdateChatMode(
         businessId,
         contactName,
@@ -569,10 +565,6 @@ export class WhatsappWebhookController implements OnModuleDestroy {
       };
       this.socketGateway.sendNewMessageNotification(
         businessId,
-        message.from,
-        sendSocketIA,
-      );
-      this.socketGateway.sendNewMessageToConversation(
         message.from,
         sendSocketIA,
       );
