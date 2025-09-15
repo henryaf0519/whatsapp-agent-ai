@@ -47,12 +47,25 @@ export class SocketGateway
   private readonly logger = new Logger(SocketGateway.name);
 
   public sendNewMessageNotification(
+    businessId: string,
+    conversationId: string,
+    message: MessagePayload,
+  ): void {
+    this.logger.log(
+      `Emitiendo 'newNotification' para la empresa: ${businessId}`,
+    );
+    // Emitimos el evento a la sala de la empresa
+    this.server
+      .to(businessId)
+      .emit('newNotification', { conversationId, message });
+  }
+
+  public sendNewMessageToConversation(
     conversationId: string,
     message: MessagePayload,
   ): void {
     this.logger.log(`Emitiendo 'newMessage' para el chat: ${conversationId}`);
     this.server.to(conversationId).emit('newMessage', message);
-    this.server.emit('newNotification', { conversationId, message });
   }
 
   afterInit(server: Server): void {
@@ -65,6 +78,17 @@ export class SocketGateway
 
   handleDisconnect(client: Socket): void {
     this.logger.log(`Cliente desconectado: ${client.id}`);
+  }
+
+  @SubscribeMessage('subscribeToCompany')
+  handleSubscribeToCompany(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() companyId: string,
+  ): void {
+    this.logger.log(
+      `Cliente ${client.id} se ha suscrito a la empresa ${companyId}`,
+    );
+    client.join(companyId);
   }
 
   @SubscribeMessage('subscribeToChat')

@@ -5,6 +5,7 @@ declare namespace Express {
     userId: string;
     email: string;
     waba_id: string;
+    number_id: string;
   }
 
   // Ahora extendemos la interfaz Request para incluir nuestra nueva definición de User.

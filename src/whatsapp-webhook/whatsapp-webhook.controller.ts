@@ -444,14 +444,9 @@ export class WhatsappWebhookController implements OnModuleDestroy {
   }
 
   private async processChange(change: WhatsAppChange): Promise<void> {
-    //this.logger.log('Processing change', JSON.stringify(change, null, 2));
     if (change.field !== 'messages') {
       return;
     }
-    this.logger.log(
-      'New message change detected',
-      JSON.stringify(change, null, 2),
-    );
     const businessId = change.value.metadata.phone_number_id;
     const contact = change.value.contacts?.[0];
     const contactName = contact?.profile?.name || 'Desconocido';
@@ -508,6 +503,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
 
     try {
       await this.dynamoService.saveMessage(
+        businessId,
         message.from,
         message.from,
         payload?.text || '',
@@ -524,6 +520,11 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         SK: `MESSAGE#${new Date().toISOString()}`,
       };
       this.socketGateway.sendNewMessageNotification(
+        businessId,
+        message.from,
+        sendSocketUser,
+      );
+      this.socketGateway.sendNewMessageToConversation(
         message.from,
         sendSocketUser,
       );
@@ -552,6 +553,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
           : (reply.text ?? '');
 
       await this.dynamoService.saveMessage(
+        businessId,
         message.from,
         'IA',
         messageResp,
@@ -565,7 +567,15 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         type: reply.type,
         SK: `MESSAGE#${new Date().toISOString()}`,
       };
-      this.socketGateway.sendNewMessageNotification(message.from, sendSocketIA);
+      this.socketGateway.sendNewMessageNotification(
+        businessId,
+        message.from,
+        sendSocketIA,
+      );
+      this.socketGateway.sendNewMessageToConversation(
+        message.from,
+        sendSocketIA,
+      );
 
       if (!reply) {
         // Send a default error message

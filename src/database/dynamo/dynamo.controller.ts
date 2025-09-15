@@ -25,9 +25,21 @@ export class DynamoController {
     return this.dynamoService.getConversations();
   }
 
+  @UseGuards(AuthGuard('jwt'))
   @Get('messages/:conversationId')
-  getMessages(@Param('conversationId') conversationId: string) {
-    return this.dynamoService.getMessages(conversationId);
+  getMessages(
+    @Param('conversationId') conversationId: string,
+    @Req() req: Request,
+  ) {
+    // Obtenemos el number_id del usuario logueado desde el token
+    console.log('Fetching messages for conversationId:', conversationId);
+    const user = req.user as { number_id: string } | undefined;
+    console.log('Fetching messages for conversationId:', user);
+    if (!user || !user.number_id) {
+      throw new Error('number_id no encontrado en el token del usuario.');
+    }
+    const businessId = user.number_id;
+    return this.dynamoService.getMessages(businessId, conversationId);
   }
 
   @Post('control/:conversationId')
@@ -38,9 +50,19 @@ export class DynamoController {
     return this.dynamoService.updateChatMode(conversationId, newMode);
   }
 
+  @UseGuards(AuthGuard('jwt'))
   @Post('message')
-  handleAgentMessage(@Body() body: { conversationId: string; text: string }) {
+  handleAgentMessage(
+    @Body() body: { conversationId: string; text: string },
+    @Req() req: Request,
+  ) {
+    const user = req.user as { number_id: string } | undefined;
+    if (!user || !user.number_id) {
+      throw new Error('numer_id no encontrado en el token del usuario.');
+    }
+
     return this.dynamoService.handleAgentMessage(
+      user.number_id,
       body.conversationId,
       body.text,
     );
@@ -51,7 +73,7 @@ export class DynamoController {
   async getContacts(@Req() req: Request) {
     const user = req.user as { number_id: string } | undefined;
     if (!user || !user.number_id) {
-      throw new Error('waba_id no encontrado en el token del usuario.');
+      throw new Error('number_id no encontrado en el token del usuario.');
     }
     return this.dynamoService.getContactsForBusiness(user.number_id);
   }

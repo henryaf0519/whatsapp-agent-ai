@@ -491,6 +491,7 @@ export class DynamoService {
   }
 
   async saveMessage(
+    businessId: string,
     conversationId: string,
     from: string,
     text: string,
@@ -501,7 +502,7 @@ export class DynamoService {
   ): Promise<any> {
     const timestamp = new Date().toISOString();
     const item: any = {
-      PK: `CONVERSATION#${conversationId}`,
+      PK: `CONVERSATION#${businessId}#${conversationId}`,
       SK: `MESSAGE#${timestamp}`,
       from: from,
       type: type,
@@ -513,8 +514,6 @@ export class DynamoService {
     if (url) {
       item.url = url;
     }
-
-    this.logger.debug('guardando informacion del mensaje: ', item);
 
     const command = new PutCommand({
       TableName: 'ConversationsTable',
@@ -530,15 +529,19 @@ export class DynamoService {
     }
   }
 
-  async handleAgentMessage(conversationId: string, text: string): Promise<any> {
+  async handleAgentMessage(
+    businessId: string,
+    conversationId: string,
+    text: string,
+  ): Promise<any> {
     // Generamos la clave de ordenación (SK) con un timestamp para el orden cronológico
     const timestamp = new Date().toISOString();
 
     const command = new PutCommand({
       TableName: 'ConversationsTable',
       Item: {
-        PK: `CONVERSATION#${conversationId}`, // La clave de partición agrupa la conversación
-        SK: `MESSAGE#${timestamp}`, // La clave de ordenación para el orden
+        PK: `CONVERSATION#${businessId}#${conversationId}`,
+        SK: `MESSAGE#${timestamp}`,
         from: 'IA',
         type: 'text',
         text: text,
@@ -557,7 +560,10 @@ export class DynamoService {
     }
   }
 
-  async getMessages(conversationId: string): Promise<any[]> {
+  async getMessages(
+    businessId: string,
+    conversationId: string,
+  ): Promise<any[]> {
     const command = new QueryCommand({
       TableName: 'ConversationsTable',
       KeyConditionExpression: '#pk = :pkValue',
@@ -565,7 +571,7 @@ export class DynamoService {
         '#pk': 'PK',
       },
       ExpressionAttributeValues: {
-        ':pkValue': `CONVERSATION#${conversationId}`,
+        ':pkValue': `CONVERSATION#${businessId}#${conversationId}`,
       },
       ScanIndexForward: true,
     });
