@@ -13,7 +13,6 @@ import axios, { AxiosError, AxiosResponse } from 'axios';
 import { S3ConversationLogService } from 'src/conversation-log/s3-conversation-log.service';
 import { Readable } from 'stream';
 import { DynamoService } from 'src/database/dynamo/dynamo.service';
-import { RedisService } from 'src/redis/redis/redis.service';
 
 interface WhatsAppMessageBody {
   messaging_product: string;
@@ -45,7 +44,6 @@ export class WhatsappService {
     private readonly s3Service: S3ConversationLogService,
     @Inject(forwardRef(() => DynamoService))
     private readonly db: DynamoService,
-    private readonly redisService: RedisService,
   ) {}
 
   private validateMessageInput(to: string, message: string): void {
@@ -150,21 +148,7 @@ export class WhatsappService {
   ): Promise<WhatsAppApiResponse> {
     try {
       this.validateMessageInput(to, message);
-      const businessCredentials = await this.getWhatsappToken(businessId);
-      if (!businessCredentials) {
-        throw new HttpException(
-          'No se encontraron credenciales para la cuenta de WhatsApp Business proporcionada.',
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-      const whatsappToken = businessCredentials;
-      if (!whatsappToken) {
-        throw new HttpException(
-          'Credenciales incompletas para la cuenta de WhatsApp Business.',
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-
+      const whatsappToken = await this.getWhatsappToken(businessId);
       const body: WhatsAppMessageBody = {
         messaging_product: 'whatsapp',
         to: to.replace(/\D/g, ''),
@@ -265,20 +249,7 @@ export class WhatsappService {
     try {
       // Validate inputs
       this.validateMessageInput(to, templateName);
-      const businessCredentials = await this.getWhatsappToken(businessId);
-      if (!businessCredentials) {
-        throw new HttpException(
-          'No se encontraron credenciales para la cuenta de WhatsApp Business proporcionada.',
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-      const whatsappToken = businessCredentials;
-      if (!whatsappToken) {
-        throw new HttpException(
-          'Credenciales incompletas para la cuenta de WhatsApp Business.',
-          HttpStatus.BAD_REQUEST,
-        );
-      }
+      const whatsappToken = await this.getWhatsappToken(businessId);
 
       const body: WhatsAppMessageBody = {
         messaging_product: 'whatsapp',
@@ -398,20 +369,7 @@ export class WhatsappService {
   ): Promise<string> {
     try {
       const mediaUrl = await this.getMediaUrl(mediaId, businessId);
-      const businessCredentials = await this.getWhatsappToken(businessId);
-      if (!businessCredentials) {
-        throw new HttpException(
-          'No se encontraron credenciales para la cuenta de WhatsApp Business proporcionada.',
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-      const whatsappToken = businessCredentials;
-      if (!whatsappToken) {
-        throw new HttpException(
-          'Credenciales incompletas para la cuenta de WhatsApp Business.',
-          HttpStatus.BAD_REQUEST,
-        );
-      }
+      const whatsappToken = await this.getWhatsappToken(businessId);
 
       const response: AxiosResponse = await axios({
         url: mediaUrl,
@@ -450,20 +408,7 @@ export class WhatsappService {
   ): Promise<string> {
     const url = `https://graph.facebook.com/v22.0/${mediaId}`;
     try {
-      const businessCredentials = await this.getWhatsappToken(businessId);
-      if (!businessCredentials) {
-        throw new HttpException(
-          'No se encontraron credenciales para la cuenta de WhatsApp Business proporcionada.',
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-      const whatsappToken = businessCredentials;
-      if (!whatsappToken) {
-        throw new HttpException(
-          'Credenciales incompletas para la cuenta de WhatsApp Business.',
-          HttpStatus.BAD_REQUEST,
-        );
-      }
+      const whatsappToken = await this.getWhatsappToken(businessId);
       const response: AxiosResponse<{ url: string }> = await axios.get(url, {
         headers: {
           Authorization: `Bearer ${whatsappToken}`,
@@ -525,20 +470,7 @@ export class WhatsappService {
     businessId: string,
   ): Promise<{ buffer: Buffer; mimeType: string }> {
     this.logger.log(`Obteniendo URL para mediaId: ${mediaId}`);
-    const businessCredentials = await this.getWhatsappToken(businessId);
-    if (!businessCredentials) {
-      throw new HttpException(
-        'No se encontraron credenciales para la cuenta de WhatsApp Business proporcionada.',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-    const whatsappToken = businessCredentials;
-    if (!whatsappToken) {
-      throw new HttpException(
-        'Credenciales incompletas para la cuenta de WhatsApp Business.',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
+    const whatsappToken = await this.getWhatsappToken(businessId);
 
     // 1. Obtener la URL del medio
     const urlResponse = await axios.get(
@@ -595,17 +527,6 @@ export class WhatsappService {
   }
 
   private async getWhatsappToken(businessId: string): Promise<string> {
-    const cacheKey = `whatsapp-token:${businessId}`;
-
-    let token = await this.redisService.get(cacheKey);
-    if (token) {
-      this.logger.log(`Token para ${businessId} obtenido desde el caché.`);
-      return token;
-    }
-
-    this.logger.log(
-      `Token para ${businessId} no encontrado en caché. Buscando en DB...`,
-    );
     const businessCredentials =
       await this.db.findBusinessByNumberId(businessId);
 
@@ -615,12 +536,8 @@ export class WhatsappService {
         HttpStatus.BAD_REQUEST,
       );
     }
-
-    token = businessCredentials.whatsapp_token;
-
-    await this.redisService.set(cacheKey, token ? token : '', 3600);
+    const token = businessCredentials.whatsapp_token;
     this.logger.log(`Token para ${businessId} guardado en caché.`);
-
     return token ? token : '';
   }
 }
