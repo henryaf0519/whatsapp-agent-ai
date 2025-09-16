@@ -54,7 +54,7 @@ export class BulkMessagingService {
     }>;
   }
 
-  @Cron(CronExpression.EVERY_MINUTE)
+  /*@Cron(CronExpression.EVERY_MINUTE)
   async handleCron() {
     this.logger.log('Verificando recordatorios de mensajes masivos...');
 
@@ -89,5 +89,5 @@ export class BulkMessagingService {
         await this.dynamoService.deactivateSchedule(schedule.scheduleId);
       }
     }
-  }
+  }*/
 }

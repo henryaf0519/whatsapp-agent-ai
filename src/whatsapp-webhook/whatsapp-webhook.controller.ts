@@ -217,6 +217,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
 
   private async validateMessage(
     message: WhatsAppMessage,
+    businessId: string,
   ): Promise<MessageContent | null> {
     if (!message.from || !message.id) {
       this.logger.warn('Message missing required fields (from or id)', {
@@ -260,6 +261,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
     if (message.type === 'image' && message.image?.id) {
       try {
         const imageUrl = await this.whatsappService.processAndUploadMedia(
+          businessId,
           message.image.id,
           message.image.mime_type,
         );
@@ -279,6 +281,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         this.logger.log(`Procesando audio con mediaId: ${message.audio.id}`);
         const { buffer, mimeType } = await this.whatsappService.downloadMedia(
           message.audio.id,
+          businessId,
         );
         const fileName = `audio/${message.from}/${message.id}.ogg`;
         const audioUrl = await this.whatsappService.uploadMediaBuffer(
@@ -478,7 +481,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
     if (this.isDuplicate(message.id)) {
       return;
     }
-    const messageContent = await this.validateMessage(message);
+    const messageContent = await this.validateMessage(message, businessId);
     if (!messageContent) {
       return;
     }
@@ -573,16 +576,25 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         // Send a default error message
         const defaultReply =
           'Lo siento, no pude procesar tu mensaje en este momento. Por favor, intenta de nuevo.';
-        await this.whatsappService.sendMessage(message.from, defaultReply);
+        await this.whatsappService.sendMessage(
+          message.from,
+          businessId,
+          defaultReply,
+        );
         return;
       }
       if (reply.type === 'plantilla') {
         await this.whatsappService.sendTemplateMessage(
           message.from,
+          businessId,
           reply.template || '',
         );
       } else {
-        await this.whatsappService.sendMessage(message.from, reply.text ?? '');
+        await this.whatsappService.sendMessage(
+          message.from,
+          businessId,
+          reply.text ?? '',
+        );
       }
     } catch (error) {
       this.logger.error(
@@ -600,7 +612,11 @@ export class WhatsappWebhookController implements OnModuleDestroy {
       try {
         const errorReply =
           'Disculpa, hubo un problema procesando tu mensaje. Nuestro equipo ha sido notificado.';
-        await this.whatsappService.sendMessage(message.from, errorReply);
+        await this.whatsappService.sendMessage(
+          message.from,
+          businessId,
+          errorReply,
+        );
       } catch (sendError) {
         this.logger.error('Failed to send error message to user', {
           messageId: message.id,
@@ -663,32 +679,5 @@ export class WhatsappWebhookController implements OnModuleDestroy {
       clearInterval(this.cleanupInterval);
     }
     this.processedMessages.clear();
-  }
-
-  // Health check endpoint
-  @Get('health')
-  async healthCheck(): Promise<{ status: string; details: any }> {
-    try {
-      const whatsappHealthy = await this.whatsappService.healthCheck();
-
-      return {
-        status: whatsappHealthy ? 'healthy' : 'degraded',
-        details: {
-          whatsappService: whatsappHealthy ? 'healthy' : 'unhealthy',
-          processedMessagesCount: this.processedMessages.size,
-          uptime: process.uptime(),
-          timestamp: new Date().toISOString(),
-        },
-      };
-    } catch (error) {
-      this.logger.error('Health check failed', error);
-      return {
-        status: 'unhealthy',
-        details: {
-          error: error instanceof Error ? error.message : String(error),
-          timestamp: new Date().toISOString(),
-        },
-      };
-    }
   }
 }

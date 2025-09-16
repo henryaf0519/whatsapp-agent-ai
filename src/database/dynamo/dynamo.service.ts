@@ -4,7 +4,7 @@
 
 /* eslint-disable @typescript-eslint/require-await */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-import { Injectable, Logger } from '@nestjs/common';
+import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -46,6 +46,7 @@ export class DynamoService {
   private readonly logger = new Logger(DynamoService.name);
   constructor(
     private config: ConfigService,
+    @Inject(forwardRef(() => WhatsappService))
     private readonly whatsappService: WhatsappService,
   ) {
     this.dynamoClient = new DynamoDBClient({
@@ -552,7 +553,7 @@ export class DynamoService {
 
     try {
       const response = await this.docClient.send(command);
-      await this.whatsappService.sendMessage(conversationId, text);
+      await this.whatsappService.sendMessage(conversationId, businessId, text);
       return response;
     } catch (error) {
       console.error('Error al guardar el mensaje:', error);
@@ -974,5 +975,37 @@ export class DynamoService {
       },
     });
     return this.docClient.send(command);
+  }
+
+  async findBusinessByNumberId(numberId: string): Promise<any | undefined> {
+    const command = new QueryCommand({
+      TableName: 'login',
+      IndexName: 'number_id-index',
+      KeyConditionExpression: 'number_id = :numberId',
+      ExpressionAttributeValues: {
+        ':numberId': numberId,
+      },
+    });
+
+    try {
+      const result = await this.docClient.send(command);
+      if (result.Items && result.Items.length > 0) {
+        this.logger.log(
+          `Credenciales encontradas: `,
+          JSON.stringify(result.Items[0]),
+        );
+        return result.Items[0];
+      }
+      this.logger.warn(
+        `No se encontraron credenciales para number_id: ${numberId}`,
+      );
+      return undefined;
+    } catch (error) {
+      this.logger.error(
+        `Error al buscar credenciales por number_id: ${numberId}`,
+        error,
+      );
+      return undefined;
+    }
   }
 }
