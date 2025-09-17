@@ -1027,10 +1027,6 @@ export class DynamoService {
     try {
       const result = await this.docClient.send(command);
       if (result.Items && result.Items.length > 0) {
-        this.logger.log(
-          `Credenciales encontradas: `,
-          JSON.stringify(result.Items[0]),
-        );
         return result.Items[0];
       }
       this.logger.warn(

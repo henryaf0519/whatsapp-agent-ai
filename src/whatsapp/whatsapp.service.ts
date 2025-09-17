@@ -537,7 +537,6 @@ export class WhatsappService {
       );
     }
     const token = businessCredentials.whatsapp_token;
-    this.logger.log(`Token para ${businessId} guardado en caché.`);
     return token ? token : '';
   }
 }

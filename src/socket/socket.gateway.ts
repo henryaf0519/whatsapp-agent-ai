@@ -51,10 +51,6 @@ export class SocketGateway
     conversationId: string,
     message: MessagePayload,
   ): void {
-    this.logger.log(
-      `Emitiendo 'newNotification' para la empresa: ${businessId}, mensaje: ${JSON.stringify(message)}`,
-    );
-    // Emitimos el evento a la sala de la empresa
     this.server
       .to(businessId)
       .emit('newNotification', { conversationId, message });
@@ -68,7 +64,6 @@ export class SocketGateway
     conversationId: string,
     message: MessagePayload,
   ): void {
-    this.logger.log(`Emitiendo 'newMessage' para el chat: ${conversationId}`);
     this.server.to(conversationId).emit('newMessage', message);
   }
 
@@ -89,9 +84,6 @@ export class SocketGateway
     @ConnectedSocket() client: Socket,
     @MessageBody() companyId: string,
   ): void {
-    this.logger.log(
-      `Cliente ${client.id} se ha suscrito a la empresa ${companyId}`,
-    );
     client.join(companyId);
   }
 
