@@ -691,6 +691,7 @@ export class DynamoService {
         conversationId,
         modo,
         name: contactName,
+        stage: 'Nuevo',
         createdAt: new Date().toISOString(),
       },
       // ✅ La clave de la solución: Condición para que solo se cree si no existe
@@ -713,6 +714,38 @@ export class DynamoService {
         console.error('Error al crear/actualizar el modo del chat:', error);
         throw error;
       }
+    }
+  }
+
+  async updateContactStage(
+    conversationId: string,
+    stage: string,
+  ): Promise<any> {
+    const command = new UpdateCommand({
+      TableName: 'ChatControl',
+      Key: { conversationId },
+      UpdateExpression: 'set #stage = :stage',
+      ExpressionAttributeNames: {
+        '#stage': 'stage',
+      },
+      ExpressionAttributeValues: {
+        ':stage': stage,
+      },
+      ReturnValues: 'ALL_NEW',
+    });
+
+    try {
+      const response = await this.docClient.send(command);
+      this.logger.log(
+        `Etapa del contacto ${conversationId} actualizada a "${stage}"`,
+      );
+      return response.Attributes;
+    } catch (error) {
+      this.logger.error(
+        `Error al actualizar la etapa del contacto ${conversationId}`,
+        error,
+      );
+      throw error;
     }
   }
 

@@ -6,6 +6,7 @@ import {
   Param,
   UseGuards,
   Req,
+  Patch,
 } from '@nestjs/common';
 import { DynamoService } from './dynamo.service';
 import { AuthGuard } from '@nestjs/passport';
@@ -76,5 +77,14 @@ export class DynamoController {
       throw new Error('number_id no encontrado en el token del usuario.');
     }
     return this.dynamoService.getContactsForBusiness(user.number_id);
+  }
+
+  @Patch('contacts/:conversationId/stage')
+  @UseGuards(AuthGuard('jwt'))
+  updateContactStage(
+    @Param('conversationId') conversationId: string,
+    @Body('stage') stage: string,
+  ) {
+    return this.dynamoService.updateContactStage(conversationId, stage);
   }
 }
