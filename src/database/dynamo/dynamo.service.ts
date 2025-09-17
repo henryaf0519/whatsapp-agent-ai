@@ -640,10 +640,13 @@ export class DynamoService {
     }
   }
 
-  async getChatMode(conversationId: string): Promise<'IA' | 'humano'> {
+  async getChatMode(
+    businessId: string,
+    conversationId: string,
+  ): Promise<'IA' | 'humano'> {
     const command = new GetCommand({
       TableName: 'ChatControl',
-      Key: { conversationId },
+      Key: { businessId, conversationId },
     });
 
     try {
@@ -656,12 +659,13 @@ export class DynamoService {
   }
 
   async updateChatMode(
+    businessId: string,
     conversationId: string,
     newMode: 'IA' | 'humano',
   ): Promise<{ success: boolean; message: string }> {
     const command = new UpdateCommand({
       TableName: 'ChatControl',
-      Key: { conversationId },
+      Key: { businessId, conversationId },
       UpdateExpression: 'SET modo = :newMode',
       ExpressionAttributeValues: {
         ':newMode': newMode,
@@ -687,15 +691,15 @@ export class DynamoService {
       TableName: 'ChatControl',
       Item: {
         businessId,
-        contactName,
         conversationId,
+        contactName,
         modo,
         name: contactName,
         stage: 'Nuevo',
         createdAt: new Date().toISOString(),
       },
-      // ✅ La clave de la solución: Condición para que solo se cree si no existe
-      ConditionExpression: 'attribute_not_exists(conversationId)',
+      ConditionExpression:
+        'attribute_not_exists(businessId) AND attribute_not_exists(conversationId)',
     });
 
     try {
@@ -718,12 +722,13 @@ export class DynamoService {
   }
 
   async updateContactStage(
+    businessId: string,
     conversationId: string,
     stage: string,
   ): Promise<any> {
     const command = new UpdateCommand({
       TableName: 'ChatControl',
-      Key: { conversationId },
+      Key: { businessId, conversationId },
       UpdateExpression: 'set #stage = :stage',
       ExpressionAttributeNames: {
         '#stage': 'stage',
@@ -752,7 +757,6 @@ export class DynamoService {
   async getContactsForBusiness(businessId: string): Promise<any[]> {
     const command = new QueryCommand({
       TableName: 'ChatControl',
-      IndexName: 'businessId-index',
       KeyConditionExpression: 'businessId = :businessId',
       ExpressionAttributeValues: {
         ':businessId': businessId,

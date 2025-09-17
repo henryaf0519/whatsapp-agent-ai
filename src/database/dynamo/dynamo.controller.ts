@@ -47,8 +47,17 @@ export class DynamoController {
   updateChatMode(
     @Param('conversationId') conversationId: string,
     @Body('newMode') newMode: 'IA' | 'humano',
+    @Req() req: Request,
   ) {
-    return this.dynamoService.updateChatMode(conversationId, newMode);
+    const user = req.user as { number_id: string } | undefined;
+    if (!user || !user.number_id) {
+      throw new Error('numer_id no encontrado en el token del usuario.');
+    }
+    return this.dynamoService.updateChatMode(
+      user.number_id,
+      conversationId,
+      newMode,
+    );
   }
 
   @UseGuards(AuthGuard('jwt'))
@@ -84,7 +93,16 @@ export class DynamoController {
   updateContactStage(
     @Param('conversationId') conversationId: string,
     @Body('stage') stage: string,
+    @Req() req: Request,
   ) {
-    return this.dynamoService.updateContactStage(conversationId, stage);
+    const user = req.user as { number_id: string } | undefined;
+    if (!user || !user.number_id) {
+      throw new Error('businessId no encontrado en el token del usuario.');
+    }
+    return this.dynamoService.updateContactStage(
+      user.number_id,
+      conversationId,
+      stage,
+    );
   }
 }

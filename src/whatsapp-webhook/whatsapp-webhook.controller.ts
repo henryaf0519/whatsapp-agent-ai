@@ -533,7 +533,10 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         message.from,
         'IA',
       );
-      const chatMode = await this.dynamoService.getChatMode(message.from);
+      const chatMode = await this.dynamoService.getChatMode(
+        businessId,
+        message.from,
+      );
       this.logger.debug('modo: ', chatMode);
       if (chatMode && chatMode === 'humano') {
         this.logger.log(
