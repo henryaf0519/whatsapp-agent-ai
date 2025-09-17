@@ -33,6 +33,54 @@ interface WhatsAppApiResponse {
   }>;
 }
 
+interface InteractiveButtonMessage {
+  type: 'button';
+  body: { text: string };
+  action: {
+    buttons: Array<{
+      type: 'reply';
+      reply: {
+        id: string;
+        title: string;
+      };
+    }>;
+  };
+}
+
+interface InteractiveListMessage {
+  type: 'list';
+  header?: {
+    type: 'text';
+    text: string;
+  };
+  body: {
+    text: string;
+  };
+  footer?: {
+    text: string;
+  };
+  action: {
+    button: string; // Texto del botón que abre la lista
+    sections: Array<{
+      title: string;
+      rows: Array<{
+        id: string;
+        title: string;
+        description?: string;
+      }>;
+    }>;
+  };
+}
+
+type InteractiveMessage = InteractiveButtonMessage | InteractiveListMessage;
+interface WhatsAppInteractiveMessageBody {
+  messaging_product: 'whatsapp';
+  recipient_type: 'individual';
+  to: string;
+  type: 'interactive';
+  interactive: InteractiveMessage;
+}
+
 @Injectable()
 export class WhatsappService {
   private readonly logger = new Logger(WhatsappService.name);
@@ -236,6 +284,48 @@ export class WhatsappService {
 
       throw new HttpException(
         'Error interno del servidor al procesar mensaje WhatsApp',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  async sendInteractiveMessage(
+    to: string,
+    businessId: string,
+    interactiveMessage: InteractiveMessage,
+  ): Promise<WhatsAppApiResponse> {
+    const whatsappToken = await this.getWhatsappToken(businessId);
+
+    const body: WhatsAppInteractiveMessageBody = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: to.replace(/\D/g, ''),
+      type: 'interactive',
+      interactive: interactiveMessage,
+    };
+
+    this.logger.log(`Enviando mensaje interactivo a: ${to}`);
+    const apiUrl = `https://graph.facebook.com/v23.0/${businessId}/messages`;
+
+    // (Puedes reutilizar la lógica de reintentos de tus otras funciones de envío)
+    try {
+      const response: AxiosResponse<WhatsAppApiResponse> = await axios.post(
+        apiUrl,
+        body,
+        {
+          headers: {
+            Authorization: `Bearer ${whatsappToken}`,
+            'Content-Type': 'application/json',
+          },
+        },
+      );
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        this.handleAxiosError(error, 1);
+      }
+      throw new HttpException(
+        'Error inesperado al enviar mensaje interactivo',
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

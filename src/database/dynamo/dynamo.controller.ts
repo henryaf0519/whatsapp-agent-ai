@@ -105,4 +105,25 @@ export class DynamoController {
       stage,
     );
   }
+
+  @Post('interactive-buttons')
+  @UseGuards(AuthGuard('jwt'))
+  createInteractiveButton(@Body() buttonData: any, @Req() req: Request) {
+    // El error indica que el token contiene 'number_id'
+    const user = req.user as { number_id: string };
+    if (!user || !user.number_id) {
+      throw new Error('El number_id no se encontró en el token del usuario.');
+    }
+    return this.dynamoService.createInteractiveButton(
+      user.number_id,
+      buttonData,
+    );
+  }
+
+  @Get('interactive-buttons')
+  @UseGuards(AuthGuard('jwt'))
+  getInteractiveButtons(@Req() req: Request) {
+    const user = req.user as { number_id: string };
+    return this.dynamoService.getInteractiveButtonsForAccount(user.number_id);
+  }
 }

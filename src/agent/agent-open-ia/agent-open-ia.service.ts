@@ -800,7 +800,6 @@ export class AgentOpenIaService implements OnModuleInit {
         actions,
       );
 
-      // Retornar respuesta con plantilla de bienvenida
       return { type: 'plantilla', template: 'bienvenida_inicial', text: '' };
     }
 

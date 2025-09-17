@@ -23,6 +23,13 @@ interface WhatsAppMessage {
   id: string;
   timestamp: string;
   text?: { body: string };
+  interactive?: {
+    type: string;
+    button_reply?: {
+      id: string;
+      title: string;
+    };
+  };
   button?: {
     payload: string;
     text: string;
@@ -236,6 +243,19 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         type: 'button',
         payload: message.button.payload,
         text: message.button.text,
+      });
+    }
+
+    if (message.type === 'interactive' && message.interactive) {
+      this.logger.debug('Message is a button reply', {
+        messageId: message.id,
+        payload: message.interactive.button_reply?.id,
+        text: message.interactive.button_reply?.title,
+      });
+      return Promise.resolve({
+        type: 'button',
+        payload: message.interactive.button_reply?.id,
+        text: message.interactive.button_reply?.title,
       });
     }
     if (message.type === 'text' && message.text?.body) {
@@ -481,6 +501,8 @@ export class WhatsappWebhookController implements OnModuleDestroy {
     if (this.isDuplicate(message.id)) {
       return;
     }
+
+    this.logger.debug('Processing message', JSON.stringify(message, null, 2));
     const messageContent = await this.validateMessage(message, businessId);
     if (!messageContent) {
       return;
