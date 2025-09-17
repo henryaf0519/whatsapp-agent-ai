@@ -896,6 +896,30 @@ export class AgentOpenIaService implements OnModuleInit {
             text: resp,
           };
         }
+
+      case 'Salud,Riesgo (Pensionado)':
+        if (actions.activityEconomic === 'Independientes') {
+          const resp = await this.dynamoService.findPrices(`salud,riesgo2`, 2);
+          return {
+            type: 'text',
+            template: '',
+            text: resp,
+          };
+        } else {
+          const resp = await this.dynamoService.findPrices(`salud,riesgo1`, 1);
+          return {
+            type: 'text',
+            template: '',
+            text: resp,
+          };
+        }
+
+      case 'Si, quiero':
+        return {
+          type: 'text',
+          template: '',
+          text: 'Un Asesor se contactara contigo para realizar el pago',
+        };
       case 'Salud,Riesgo,Pensión':
       case 'Salud,Riesgo,Pension':
         if (actions.activityEconomic === 'Independientes') {
@@ -941,6 +965,24 @@ export class AgentOpenIaService implements OnModuleInit {
           text: resp,
         };
       }
+      case 'Quienes Somos': {
+        const resp = await this.dynamoService.findPolicies(`about`);
+        return {
+          type: 'text',
+          template: '',
+          text: resp,
+        };
+      }
+      case 'Pension Exterior':
+        return {
+          type: 'plantilla',
+          template: 'pension',
+          text: 'Pension Exterior',
+          actions: {
+            services: 'Pension Exterior',
+            activityEconomic: '',
+          },
+        };
       case 'Polizas Incapacidad': {
         const resp = await this.dynamoService.findPolicies(`poliza`);
         return {

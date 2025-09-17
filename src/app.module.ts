@@ -17,6 +17,7 @@ import { SocketGateway } from './socket/socket.gateway';
 import { AuthModule } from './auth/auth.module';
 import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { TranscriptionModule } from './transcription/transcription.module';
+import { BulkMessagingModule } from './bulk-messaging/bulk-messaging.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { TranscriptionModule } from './transcription/transcription.module';
     AuthModule,
     WhatsappModule,
     TranscriptionModule,
+    BulkMessagingModule,
   ],
   controllers: [
     AppController,

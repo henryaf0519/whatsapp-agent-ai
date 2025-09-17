@@ -217,6 +217,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
 
   private async validateMessage(
     message: WhatsAppMessage,
+    businessId: string,
   ): Promise<MessageContent | null> {
     if (!message.from || !message.id) {
       this.logger.warn('Message missing required fields (from or id)', {
@@ -260,6 +261,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
     if (message.type === 'image' && message.image?.id) {
       try {
         const imageUrl = await this.whatsappService.processAndUploadMedia(
+          businessId,
           message.image.id,
           message.image.mime_type,
         );
@@ -279,6 +281,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         this.logger.log(`Procesando audio con mediaId: ${message.audio.id}`);
         const { buffer, mimeType } = await this.whatsappService.downloadMedia(
           message.audio.id,
+          businessId,
         );
         const fileName = `audio/${message.from}/${message.id}.ogg`;
         const audioUrl = await this.whatsappService.uploadMediaBuffer(
@@ -444,11 +447,12 @@ export class WhatsappWebhookController implements OnModuleDestroy {
   }
 
   private async processChange(change: WhatsAppChange): Promise<void> {
-    //this.logger.log('Processing change', JSON.stringify(change, null, 2));
     if (change.field !== 'messages') {
       return;
     }
-
+    const businessId = change.value.metadata.phone_number_id;
+    const contact = change.value.contacts?.[0];
+    const contactName = contact?.profile?.name || 'Desconocido';
     const messages = change.value.messages;
     if (!messages || messages.length === 0) {
       return;
@@ -456,7 +460,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
     // Process each message
     for (const message of messages) {
       try {
-        await this.processMessage(message);
+        await this.processMessage(message, businessId, contactName);
       } catch (error) {
         this.logger.error('Error processing individual message', {
           messageId: message.id,
@@ -468,15 +472,24 @@ export class WhatsappWebhookController implements OnModuleDestroy {
     }
   }
 
-  private async processMessage(message: WhatsAppMessage): Promise<void> {
+  private async processMessage(
+    message: WhatsAppMessage,
+    businessId: string,
+    contactName: string,
+  ): Promise<void> {
     let payload: payLoad | undefined = undefined;
     if (this.isDuplicate(message.id)) {
       return;
     }
-    const messageContent = await this.validateMessage(message);
+    const messageContent = await this.validateMessage(message, businessId);
     if (!messageContent) {
       return;
     }
+
+    this.logger.log('Processing message', {
+      businessId,
+      contactName,
+    });
     // Validate message
     payload = this.createPayload(messageContent);
     this.logger.debug('Payload:', JSON.stringify(payload, null, 2));
@@ -493,6 +506,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
 
     try {
       await this.dynamoService.saveMessage(
+        businessId,
         message.from,
         message.from,
         payload?.text || '',
@@ -509,11 +523,20 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         SK: `MESSAGE#${new Date().toISOString()}`,
       };
       this.socketGateway.sendNewMessageNotification(
+        businessId,
         message.from,
         sendSocketUser,
       );
-      await this.dynamoService.createOrUpdateChatMode(message.from, 'IA');
-      const chatMode = await this.dynamoService.getChatMode(message.from);
+      await this.dynamoService.createOrUpdateChatMode(
+        businessId,
+        contactName,
+        message.from,
+        'IA',
+      );
+      const chatMode = await this.dynamoService.getChatMode(
+        businessId,
+        message.from,
+      );
       this.logger.debug('modo: ', chatMode);
       if (chatMode && chatMode === 'humano') {
         this.logger.log(
@@ -532,6 +555,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
           : (reply.text ?? '');
 
       await this.dynamoService.saveMessage(
+        businessId,
         message.from,
         'IA',
         messageResp,
@@ -545,22 +569,35 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         type: reply.type,
         SK: `MESSAGE#${new Date().toISOString()}`,
       };
-      this.socketGateway.sendNewMessageNotification(message.from, sendSocketIA);
+      this.socketGateway.sendNewMessageNotification(
+        businessId,
+        message.from,
+        sendSocketIA,
+      );
 
       if (!reply) {
         // Send a default error message
         const defaultReply =
           'Lo siento, no pude procesar tu mensaje en este momento. Por favor, intenta de nuevo.';
-        await this.whatsappService.sendMessage(message.from, defaultReply);
+        await this.whatsappService.sendMessage(
+          message.from,
+          businessId,
+          defaultReply,
+        );
         return;
       }
       if (reply.type === 'plantilla') {
         await this.whatsappService.sendTemplateMessage(
           message.from,
+          businessId,
           reply.template || '',
         );
       } else {
-        await this.whatsappService.sendMessage(message.from, reply.text ?? '');
+        await this.whatsappService.sendMessage(
+          message.from,
+          businessId,
+          reply.text ?? '',
+        );
       }
     } catch (error) {
       this.logger.error(
@@ -578,7 +615,11 @@ export class WhatsappWebhookController implements OnModuleDestroy {
       try {
         const errorReply =
           'Disculpa, hubo un problema procesando tu mensaje. Nuestro equipo ha sido notificado.';
-        await this.whatsappService.sendMessage(message.from, errorReply);
+        await this.whatsappService.sendMessage(
+          message.from,
+          businessId,
+          errorReply,
+        );
       } catch (sendError) {
         this.logger.error('Failed to send error message to user', {
           messageId: message.id,
@@ -641,32 +682,5 @@ export class WhatsappWebhookController implements OnModuleDestroy {
       clearInterval(this.cleanupInterval);
     }
     this.processedMessages.clear();
-  }
-
-  // Health check endpoint
-  @Get('health')
-  async healthCheck(): Promise<{ status: string; details: any }> {
-    try {
-      const whatsappHealthy = await this.whatsappService.healthCheck();
-
-      return {
-        status: whatsappHealthy ? 'healthy' : 'degraded',
-        details: {
-          whatsappService: whatsappHealthy ? 'healthy' : 'unhealthy',
-          processedMessagesCount: this.processedMessages.size,
-          uptime: process.uptime(),
-          timestamp: new Date().toISOString(),
-        },
-      };
-    } catch (error) {
-      this.logger.error('Health check failed', error);
-      return {
-        status: 'unhealthy',
-        details: {
-          error: error instanceof Error ? error.message : String(error),
-          timestamp: new Date().toISOString(),
-        },
-      };
-    }
   }
 }

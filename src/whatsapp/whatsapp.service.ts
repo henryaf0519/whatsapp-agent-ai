@@ -1,10 +1,18 @@
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  HttpException,
+  HttpStatus,
+  Inject,
+  forwardRef,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios, { AxiosError, AxiosResponse } from 'axios';
 import { S3ConversationLogService } from 'src/conversation-log/s3-conversation-log.service';
 import { Readable } from 'stream';
+import { DynamoService } from 'src/database/dynamo/dynamo.service';
 
 interface WhatsAppMessageBody {
   messaging_product: string;
@@ -27,8 +35,6 @@ interface WhatsAppApiResponse {
 
 @Injectable()
 export class WhatsappService {
-  private readonly whatsappApiUrl: string;
-  private readonly whatsappToken: string;
   private readonly logger = new Logger(WhatsappService.name);
   private readonly maxRetries = 3;
   private readonly retryDelay = 1000; // 1 second
@@ -36,39 +42,9 @@ export class WhatsappService {
   constructor(
     private readonly configService: ConfigService,
     private readonly s3Service: S3ConversationLogService,
-  ) {
-    this.whatsappApiUrl =
-      this.configService.get<string>('WHATSAPP_API_URL') || '';
-    this.whatsappToken =
-      this.configService.get<string>('WHATSAPP_API_TOKEN') || '';
-
-    this.validateConfiguration();
-  }
-
-  private validateConfiguration(): void {
-    if (!this.whatsappApiUrl) {
-      const error =
-        'WHATSAPP_API_URL no está configurada en las variables de entorno';
-      this.logger.error(error);
-      throw new Error(error);
-    }
-
-    if (!this.whatsappToken) {
-      const error =
-        'WHATSAPP_API_TOKEN no está configurada en las variables de entorno';
-      this.logger.error(error);
-      throw new Error(error);
-    }
-
-    // Validate URL format
-    try {
-      new URL(this.whatsappApiUrl);
-    } catch {
-      const error = 'WHATSAPP_API_URL no tiene un formato válido de URL';
-      this.logger.error(error);
-      throw new Error(error);
-    }
-  }
+    @Inject(forwardRef(() => DynamoService))
+    private readonly db: DynamoService,
+  ) {}
 
   private validateMessageInput(to: string, message: string): void {
     if (!to || typeof to !== 'string' || to.trim().length === 0) {
@@ -165,11 +141,14 @@ export class WhatsappService {
     }
   }
 
-  async sendMessage(to: string, message: string): Promise<WhatsAppApiResponse> {
+  async sendMessage(
+    to: string,
+    businessId: string,
+    message: string,
+  ): Promise<WhatsAppApiResponse> {
     try {
-      // Validate inputs
       this.validateMessageInput(to, message);
-
+      const whatsappToken = await this.getWhatsappToken(businessId);
       const body: WhatsAppMessageBody = {
         messaging_product: 'whatsapp',
         to: to.replace(/\D/g, ''),
@@ -179,15 +158,15 @@ export class WhatsappService {
       this.logger.log(`Enviando mensaje WhatsApp a: ${to}`);
 
       let lastError: Error | null = null;
-
+      const apiUrl = `https://graph.facebook.com/v23.0/${businessId}/messages`;
       for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
         try {
           const response: AxiosResponse<WhatsAppApiResponse> = await axios.post(
-            this.whatsappApiUrl,
+            apiUrl,
             body,
             {
               headers: {
-                Authorization: `Bearer ${this.whatsappToken}`,
+                Authorization: `Bearer ${whatsappToken}`,
                 'Content-Type': 'application/json',
               },
               timeout: 5000, // 10 seconds timeout
@@ -264,11 +243,13 @@ export class WhatsappService {
 
   async sendTemplateMessage(
     to: string,
+    businessId: string,
     templateName: string,
   ): Promise<WhatsAppApiResponse> {
     try {
       // Validate inputs
       this.validateMessageInput(to, templateName);
+      const whatsappToken = await this.getWhatsappToken(businessId);
 
       const body: WhatsAppMessageBody = {
         messaging_product: 'whatsapp',
@@ -286,16 +267,18 @@ export class WhatsappService {
         `Enviando mensaje de plantilla WhatsApp a : ${JSON.stringify(body)}`,
       );
 
+      const apiUrl = `https://graph.facebook.com/v23.0/${businessId}/messages`;
+
       let lastError: Error | undefined;
 
       for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
         try {
           const response: AxiosResponse<WhatsAppApiResponse> = await axios.post(
-            this.whatsappApiUrl,
+            apiUrl,
             body,
             {
               headers: {
-                Authorization: `Bearer ${this.whatsappToken}`,
+                Authorization: `Bearer ${whatsappToken}`,
                 'Content-Type': 'application/json',
               },
               timeout: 5000, // 10 seconds timeout
@@ -370,27 +353,6 @@ export class WhatsappService {
     }
   }
 
-  /**
-   * Health check method to verify WhatsApp API connectivity
-   */
-  async healthCheck(): Promise<boolean> {
-    try {
-      const response = await axios.get(
-        this.whatsappApiUrl.replace('/messages', ''), // Remove /messages if present
-        {
-          headers: {
-            Authorization: `Bearer ${this.whatsappToken}`,
-          },
-          timeout: 5000,
-        },
-      );
-      return response.status === 200;
-    } catch (error) {
-      this.logger.error('WhatsApp API health check failed:', error);
-      return false;
-    }
-  }
-
   private streamToBuffer(stream: Readable): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       const chunks: Buffer[] = [];
@@ -401,18 +363,20 @@ export class WhatsappService {
   }
 
   async processAndUploadMedia(
+    businessId: string,
     mediaId: string,
     mimeType: string,
   ): Promise<string> {
     try {
-      const mediaUrl = await this.getMediaUrl(mediaId);
+      const mediaUrl = await this.getMediaUrl(mediaId, businessId);
+      const whatsappToken = await this.getWhatsappToken(businessId);
 
       const response: AxiosResponse = await axios({
         url: mediaUrl,
         method: 'GET',
         responseType: 'stream',
         headers: {
-          Authorization: `Bearer ${this.whatsappToken}`,
+          Authorization: `Bearer ${whatsappToken}`,
         },
       });
 
@@ -438,12 +402,16 @@ export class WhatsappService {
     }
   }
 
-  private async getMediaUrl(mediaId: string): Promise<string> {
+  private async getMediaUrl(
+    mediaId: string,
+    businessId: string,
+  ): Promise<string> {
     const url = `https://graph.facebook.com/v22.0/${mediaId}`;
     try {
+      const whatsappToken = await this.getWhatsappToken(businessId);
       const response: AxiosResponse<{ url: string }> = await axios.get(url, {
         headers: {
-          Authorization: `Bearer ${this.whatsappToken}`,
+          Authorization: `Bearer ${whatsappToken}`,
         },
       });
       return response.data.url;
@@ -466,7 +434,7 @@ export class WhatsappService {
     try {
       const response = await axios.get(url, {
         headers: {
-          Authorization: `Bearer ${token}`, // <-- USA EL TOKEN DEL USUARIO
+          Authorization: `Bearer ${token}`,
         },
         params: {
           fields: 'name,components,language,status,category', // Campos que queremos obtener
@@ -499,14 +467,16 @@ export class WhatsappService {
 
   async downloadMedia(
     mediaId: string,
+    businessId: string,
   ): Promise<{ buffer: Buffer; mimeType: string }> {
     this.logger.log(`Obteniendo URL para mediaId: ${mediaId}`);
+    const whatsappToken = await this.getWhatsappToken(businessId);
 
     // 1. Obtener la URL del medio
     const urlResponse = await axios.get(
       `https://graph.facebook.com/v20.0/${mediaId}`,
       {
-        headers: { Authorization: `Bearer ${this.whatsappToken}` },
+        headers: { Authorization: `Bearer ${whatsappToken}` },
       },
     );
     const mediaUrl = urlResponse.data.url;
@@ -518,7 +488,7 @@ export class WhatsappService {
     // 2. Descargar el archivo
     this.logger.log(`Descargando medio desde: ${mediaUrl}`);
     const downloadResponse = await axios.get(mediaUrl, {
-      headers: { Authorization: `Bearer ${this.whatsappToken}` },
+      headers: { Authorization: `Bearer ${whatsappToken}` },
       responseType: 'stream',
     });
 
@@ -554,5 +524,19 @@ export class WhatsappService {
       );
       throw new Error('Error al subir el archivo a S3.');
     }
+  }
+
+  private async getWhatsappToken(businessId: string): Promise<string> {
+    const businessCredentials =
+      await this.db.findBusinessByNumberId(businessId);
+
+    if (!businessCredentials || !businessCredentials.whatsapp_token) {
+      throw new HttpException(
+        'No se encontraron credenciales para la cuenta de WhatsApp Business proporcionada.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const token = businessCredentials.whatsapp_token;
+    return token ? token : '';
   }
 }

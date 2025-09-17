@@ -15,17 +15,30 @@ import {
 import { Server, Socket } from 'socket.io';
 import { Logger } from '@nestjs/common';
 
-// Es una buena práctica definir una interfaz para la carga útil de tus mensajes.
 export interface MessagePayload {
   from: string;
   text: string;
   SK: string;
   url?: string;
-  // Agrega aquí otros campos que pueda tener tu mensaje.
 }
+const allowedOrigins = [
+  'http://localhost:5173',
+  'https://orvexchat-666d6.web.app',
+];
 
 @WebSocketGateway({
   path: '/socket',
+  cors: {
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
+    methods: ['GET', 'POST'],
+    credentials: true,
+  },
 })
 export class SocketGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
@@ -33,18 +46,27 @@ export class SocketGateway
   @WebSocketServer() server!: Server;
   private readonly logger = new Logger(SocketGateway.name);
 
-  // Método para enviar una notificación de nuevo mensaje.
-  // Este método será llamado por tu DynamoController.
   public sendNewMessageNotification(
+    businessId: string,
     conversationId: string,
     message: MessagePayload,
   ): void {
-    this.logger.log(`Emitiendo 'newMessage' para el chat: ${conversationId}`);
-    this.server.to(conversationId).emit('newMessage', message);
-    this.server.emit('newNotification', { conversationId, message });
+    this.server
+      .to(businessId)
+      .emit('newNotification', { conversationId, message });
+
+    this.server
+      .to(`${businessId}#${conversationId}`)
+      .emit('newMessage', message);
   }
 
-  // Métodos del ciclo de vida del Gateway
+  public sendNewMessageToConversation(
+    conversationId: string,
+    message: MessagePayload,
+  ): void {
+    this.server.to(conversationId).emit('newMessage', message);
+  }
+
   afterInit(server: Server): void {
     this.logger.log('WebSocket Gateway inicializado.');
   }
@@ -57,7 +79,14 @@ export class SocketGateway
     this.logger.log(`Cliente desconectado: ${client.id}`);
   }
 
-  // Puedes crear un método para suscribir a un cliente a un chat específico si lo necesitas.
+  @SubscribeMessage('subscribeToCompany')
+  handleSubscribeToCompany(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() companyId: string,
+  ): void {
+    client.join(companyId);
+  }
+
   @SubscribeMessage('subscribeToChat')
   handleSubscribe(
     @ConnectedSocket() client: Socket,

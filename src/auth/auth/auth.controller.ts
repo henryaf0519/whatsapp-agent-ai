@@ -7,13 +7,12 @@ import {
   HttpCode,
   HttpStatus,
   UnauthorizedException,
-  Res,
   Get,
   UseGuards,
   Req,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { Response } from 'express';
+import { Response, Request } from 'express';
 import { AuthGuard } from '@nestjs/passport';
 
 @Controller('auth')
@@ -25,23 +24,15 @@ export class AuthController {
   async login(
     @Body('email') email: string,
     @Body('password') password: string,
-    @Res({ passthrough: true }) res: Response,
   ) {
     const user = await this.authService.validateUser(email, password);
-
+    console.log('user: ', user);
     if (!user) {
       throw new UnauthorizedException('Credenciales inválidas');
     }
     const loginData = await this.authService.login(user);
-    res.cookie('accessToken', loginData.access_token, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'none',
-      domain: 'orvexchat-666d6.web.app',
-      path: '/',
-      expires: new Date(Date.now() + 24 * 60 * 60 * 1000),
-    });
     return {
+      accessToken: loginData.access_token,
       templates: loginData.templates,
       userData: loginData.user,
     };
@@ -53,6 +44,7 @@ export class AuthController {
     @Body('email') email: string,
     @Body('password') password: string,
     @Body('waba_id') waba_id: string,
+    @Body('number_id') number_id: string,
     @Body('whatsapp_token') whatsapp_token: string,
   ) {
     // ✅ PASAMOS LOS NUEVOS CAMPOS AL SERVICIO
@@ -61,6 +53,7 @@ export class AuthController {
       password,
       waba_id,
       whatsapp_token,
+      number_id,
     );
     return {
       message: 'Usuario registrado con éxito',

@@ -44,7 +44,8 @@ export class AuthService {
     const payload = {
       sub: user.email,
       username: user.email,
-      waba_id: user.waba_id, // <-- Añadimos el waba_id al payload del token
+      waba_id: user.waba_id,
+      number_id: user.number_id,
     };
     const accessToken = this.jwtService.sign(payload);
 
@@ -67,6 +68,7 @@ export class AuthService {
     const safeUser = {
       email: user.email,
       waba_id: user.waba_id,
+      number_id: user.number_id,
     };
 
     return {
@@ -81,6 +83,7 @@ export class AuthService {
     password: string,
     waba_id: string,
     whatsapp_token: string,
+    number_id: string,
   ): Promise<any> {
     const hashedPassword = await bcrypt.hash(password, 10);
     const user = await this.dynamoService.createUserLogin(
@@ -88,6 +91,7 @@ export class AuthService {
       hashedPassword,
       waba_id,
       whatsapp_token,
+      number_id,
     );
     return user;
   }
@@ -102,7 +106,6 @@ export class AuthService {
     token: string,
   ): Promise<void> {
     try {
-      // 1. Obtiene las plantillas usando el ID y token específicos del usuario
       const templates = await this.whatsappService.getMessageTemplates(
         wabaId,
         token,
@@ -114,6 +117,8 @@ export class AuthService {
         );
         return;
       }
+
+      this.logger.log(`Templates `, JSON.stringify(templates, null, 2));
 
       // 2. Guarda las plantillas en DynamoDB asociadas a ese wabaId
       await this.dynamoService.saveTemplatesForAccount(wabaId, templates);

@@ -1,11 +1,12 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { DynamoService } from './dynamo/dynamo.service';
 import { DynamoController } from './dynamo/dynamo.controller';
-import { WhatsappService } from 'src/whatsapp/whatsapp.service';
-import { S3ConversationLogService } from 'src/conversation-log/s3-conversation-log.service';
+import { WhatsappModule } from 'src/whatsapp/whatsapp.module';
+import { ConversationLogModule } from 'src/conversation-log/conversation-log.module';
 
 @Module({
-  providers: [DynamoService, WhatsappService, S3ConversationLogService],
+  imports: [forwardRef(() => WhatsappModule), ConversationLogModule],
+  providers: [DynamoService],
   controllers: [DynamoController],
   exports: [DynamoService],
 })

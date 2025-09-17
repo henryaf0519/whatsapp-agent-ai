@@ -1,4 +1,3 @@
-// webpack.config.js
 const nodeExternals = require('webpack-node-externals');
 const { RunScriptWebpackPlugin } = require('run-script-webpack-plugin');
 const CopyWebpackPlugin = require('copy-webpack-plugin');

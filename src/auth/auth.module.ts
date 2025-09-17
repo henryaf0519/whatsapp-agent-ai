@@ -12,18 +12,17 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 
 @Module({
   imports: [
-    ConfigModule,
     WhatsappModule,
     DatabaseModule,
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
-      inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
         secret:
-          configService.get<string>('JWT_SECRET') || 'TU_SECRETO_SUPER_SEGURO',
+          configService.get<string>('JWT_SECRET') || 'TU_SECRETO_SUPER_SEGURO', // Usa la variable de entorno
         signOptions: { expiresIn: '1h' },
       }),
+      inject: [ConfigService], // Inyecta ConfigService
     }),
   ],
   providers: [AuthService, JwtStrategy],

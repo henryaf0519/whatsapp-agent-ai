@@ -4,11 +4,12 @@
 
 /* eslint-disable @typescript-eslint/require-await */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-import { Injectable, Logger } from '@nestjs/common';
+import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { ConfigService } from '@nestjs/config';
 import {
   BatchWriteCommand,
+  DeleteCommand,
   DynamoDBDocumentClient,
   GetCommand,
   PutCommand,
@@ -20,6 +21,7 @@ import moment from 'moment-timezone';
 import { v4 as uuidv4 } from 'uuid';
 import { normalizeString } from '../../utils/utils';
 import { WhatsappService } from '../../whatsapp/whatsapp.service';
+import cronParser from 'cron-parser';
 
 interface AgentScheduleItem {
   id: string;
@@ -44,6 +46,7 @@ export class DynamoService {
   private readonly logger = new Logger(DynamoService.name);
   constructor(
     private config: ConfigService,
+    @Inject(forwardRef(() => WhatsappService))
     private readonly whatsappService: WhatsappService,
   ) {
     this.dynamoClient = new DynamoDBClient({
@@ -489,6 +492,7 @@ export class DynamoService {
   }
 
   async saveMessage(
+    businessId: string,
     conversationId: string,
     from: string,
     text: string,
@@ -499,7 +503,7 @@ export class DynamoService {
   ): Promise<any> {
     const timestamp = new Date().toISOString();
     const item: any = {
-      PK: `CONVERSATION#${conversationId}`,
+      PK: `CONVERSATION#${businessId}#${conversationId}`,
       SK: `MESSAGE#${timestamp}`,
       from: from,
       type: type,
@@ -511,8 +515,6 @@ export class DynamoService {
     if (url) {
       item.url = url;
     }
-
-    this.logger.debug('guardando informacion del mensaje: ', item);
 
     const command = new PutCommand({
       TableName: 'ConversationsTable',
@@ -528,15 +530,19 @@ export class DynamoService {
     }
   }
 
-  async handleAgentMessage(conversationId: string, text: string): Promise<any> {
+  async handleAgentMessage(
+    businessId: string,
+    conversationId: string,
+    text: string,
+  ): Promise<any> {
     // Generamos la clave de ordenación (SK) con un timestamp para el orden cronológico
     const timestamp = new Date().toISOString();
 
     const command = new PutCommand({
       TableName: 'ConversationsTable',
       Item: {
-        PK: `CONVERSATION#${conversationId}`, // La clave de partición agrupa la conversación
-        SK: `MESSAGE#${timestamp}`, // La clave de ordenación para el orden
+        PK: `CONVERSATION#${businessId}#${conversationId}`,
+        SK: `MESSAGE#${timestamp}`,
         from: 'IA',
         type: 'text',
         text: text,
@@ -547,7 +553,7 @@ export class DynamoService {
 
     try {
       const response = await this.docClient.send(command);
-      await this.whatsappService.sendMessage(conversationId, text);
+      await this.whatsappService.sendMessage(conversationId, businessId, text);
       return response;
     } catch (error) {
       console.error('Error al guardar el mensaje:', error);
@@ -555,7 +561,10 @@ export class DynamoService {
     }
   }
 
-  async getMessages(conversationId: string): Promise<any[]> {
+  async getMessages(
+    businessId: string,
+    conversationId: string,
+  ): Promise<any[]> {
     const command = new QueryCommand({
       TableName: 'ConversationsTable',
       KeyConditionExpression: '#pk = :pkValue',
@@ -563,7 +572,7 @@ export class DynamoService {
         '#pk': 'PK',
       },
       ExpressionAttributeValues: {
-        ':pkValue': `CONVERSATION#${conversationId}`,
+        ':pkValue': `CONVERSATION#${businessId}#${conversationId}`,
       },
       ScanIndexForward: true,
     });
@@ -631,10 +640,13 @@ export class DynamoService {
     }
   }
 
-  async getChatMode(conversationId: string): Promise<'IA' | 'humano'> {
+  async getChatMode(
+    businessId: string,
+    conversationId: string,
+  ): Promise<'IA' | 'humano'> {
     const command = new GetCommand({
       TableName: 'ChatControl',
-      Key: { conversationId },
+      Key: { businessId, conversationId },
     });
 
     try {
@@ -647,12 +659,13 @@ export class DynamoService {
   }
 
   async updateChatMode(
+    businessId: string,
     conversationId: string,
     newMode: 'IA' | 'humano',
   ): Promise<{ success: boolean; message: string }> {
     const command = new UpdateCommand({
       TableName: 'ChatControl',
-      Key: { conversationId },
+      Key: { businessId, conversationId },
       UpdateExpression: 'SET modo = :newMode',
       ExpressionAttributeValues: {
         ':newMode': newMode,
@@ -669,17 +682,24 @@ export class DynamoService {
   }
 
   async createOrUpdateChatMode(
+    businessId: string,
+    contactName: string,
     conversationId: string,
     modo: 'IA' | 'humano' = 'IA',
   ): Promise<void> {
     const command = new PutCommand({
       TableName: 'ChatControl',
       Item: {
+        businessId,
         conversationId,
+        contactName,
         modo,
+        name: contactName,
+        stage: 'Nuevo',
+        createdAt: new Date().toISOString(),
       },
-      // ✅ La clave de la solución: Condición para que solo se cree si no existe
-      ConditionExpression: 'attribute_not_exists(conversationId)',
+      ConditionExpression:
+        'attribute_not_exists(businessId) AND attribute_not_exists(conversationId)',
     });
 
     try {
@@ -698,6 +718,57 @@ export class DynamoService {
         console.error('Error al crear/actualizar el modo del chat:', error);
         throw error;
       }
+    }
+  }
+
+  async updateContactStage(
+    businessId: string,
+    conversationId: string,
+    stage: string,
+  ): Promise<any> {
+    const command = new UpdateCommand({
+      TableName: 'ChatControl',
+      Key: { businessId, conversationId },
+      UpdateExpression: 'set #stage = :stage',
+      ExpressionAttributeNames: {
+        '#stage': 'stage',
+      },
+      ExpressionAttributeValues: {
+        ':stage': stage,
+      },
+      ReturnValues: 'ALL_NEW',
+    });
+
+    try {
+      const response = await this.docClient.send(command);
+      this.logger.log(
+        `Etapa del contacto ${conversationId} actualizada a "${stage}"`,
+      );
+      return response.Attributes;
+    } catch (error) {
+      this.logger.error(
+        `Error al actualizar la etapa del contacto ${conversationId}`,
+        error,
+      );
+      throw error;
+    }
+  }
+
+  async getContactsForBusiness(businessId: string): Promise<any[]> {
+    const command = new QueryCommand({
+      TableName: 'ChatControl',
+      KeyConditionExpression: 'businessId = :businessId',
+      ExpressionAttributeValues: {
+        ':businessId': businessId,
+      },
+    });
+
+    try {
+      const { Items } = await this.docClient.send(command);
+      return Items || [];
+    } catch (error) {
+      this.logger.error(`Error obteniendo contactos para ${businessId}`, error);
+      return [];
     }
   }
 
@@ -728,13 +799,14 @@ export class DynamoService {
     passwordHashed: string,
     waba_id: string,
     whatsapp_token: string,
+    number_id: string,
   ): Promise<any> {
     const command = new PutCommand({
       TableName: 'login',
       Item: {
         email: email,
         password: passwordHashed,
-        // ✅ CAMPOS NUEVOS AÑADIDOS AL ITEM
+        number_id: number_id,
         waba_id: waba_id,
         whatsapp_token: whatsapp_token,
       },
@@ -849,6 +921,124 @@ export class DynamoService {
     } catch (error) {
       this.logger.error(`Error al obtener plantillas para ${wabaId}`, error);
       return []; // Devolvemos un array vacío en caso de error
+    }
+  }
+
+  async saveMessageSchedule(schedule: any): Promise<any> {
+    const command = new PutCommand({
+      TableName: 'MessageSchedules',
+      Item: schedule,
+    });
+    await this.docClient.send(command);
+    return schedule;
+  }
+
+  async getAllMessageSchedules(): Promise<any[]> {
+    const command = new ScanCommand({
+      TableName: 'MessageSchedules',
+    });
+    const response = await this.docClient.send(command);
+    return response.Items || [];
+  }
+
+  async deleteMessageSchedule(scheduleId: string): Promise<any> {
+    const command = new DeleteCommand({
+      TableName: 'MessageSchedules',
+      Key: { scheduleId },
+    });
+    return this.docClient.send(command);
+  }
+
+  async getDueSchedules(now: Date): Promise<any[]> {
+    const command = new ScanCommand({
+      TableName: 'MessageSchedules',
+      FilterExpression: 'isActive = :true',
+      ExpressionAttributeValues: { ':true': true },
+    });
+    const { Items } = await this.docClient.send(command);
+
+    if (!Items || Items.length === 0) {
+      return [];
+    }
+
+    const dueSchedules = Items.filter((schedule) => {
+      if (schedule.scheduleType === 'once' && schedule.sendAt) {
+        // 1. Leemos la fecha UTC y la convertimos a un objeto Moment en la zona de Bogotá
+        const sendAtDate = new Date(schedule.sendAt);
+        return (
+          sendAtDate.getFullYear() === now.getFullYear() &&
+          sendAtDate.getMonth() === now.getMonth() &&
+          sendAtDate.getDate() === now.getDate() &&
+          sendAtDate.getHours() === now.getHours() &&
+          sendAtDate.getMinutes() === now.getMinutes()
+        );
+      }
+
+      if (schedule.scheduleType === 'recurring' && schedule.cronExpression) {
+        try {
+          const interval = cronParser.parseExpression(schedule.cronExpression, {
+            currentDate: new Date(now.getTime() - 60000),
+            tz: 'America/Bogota',
+          });
+          const next = interval.next().toDate();
+          return (
+            next.getFullYear() === now.getFullYear() &&
+            next.getMonth() === now.getMonth() &&
+            next.getDate() === now.getDate() &&
+            next.getHours() === now.getHours() &&
+            next.getMinutes() === now.getMinutes()
+          );
+        } catch (err) {
+          this.logger.error(
+            `Expresión CRON inválida para scheduleId ${schedule.scheduleId}: "${schedule.cronExpression}"`,
+            err,
+          );
+          return false;
+        }
+      }
+
+      return false;
+    });
+
+    return dueSchedules;
+  }
+  async deactivateSchedule(scheduleId: string): Promise<any> {
+    const command = new UpdateCommand({
+      TableName: 'MessageSchedules',
+      Key: { scheduleId },
+      UpdateExpression: 'set isActive = :false',
+      ExpressionAttributeValues: {
+        ':false': false,
+      },
+    });
+    return this.docClient.send(command);
+  }
+
+  async findBusinessByNumberId(numberId: string): Promise<any | undefined> {
+    const command = new QueryCommand({
+      TableName: 'login',
+      IndexName: 'number_id-index',
+      KeyConditionExpression: 'number_id = :numberId',
+      ExpressionAttributeValues: {
+        ':numberId': numberId,
+      },
+    });
+
+    try {
+      const result = await this.docClient.send(command);
+      if (result.Items && result.Items.length > 0) {
+        return result.Items[0];
+      }
+      this.logger.warn(
+        `No se encontraron credenciales para number_id: ${numberId}`,
+      );
+      return undefined;
+    } catch (error) {
+      this.logger.error(
+        `Error al buscar credenciales por number_id: ${numberId}`,
+        error,
+      );
+      return undefined;
     }
   }
 }
