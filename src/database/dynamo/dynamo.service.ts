@@ -1052,12 +1052,23 @@ export class DynamoService {
       ...buttonData,
       createdAt: new Date().toISOString(),
     };
+
     const command = new PutCommand({
       TableName: 'InteractiveButtons',
       Item: item,
+      ConditionExpression: 'attribute_not_exists(SK)',
     });
-    await this.docClient.send(command);
-    return item;
+
+    try {
+      await this.docClient.send(command);
+      this.logger.log(
+        `Botón interactivo creado: ${item.SK} para la cuenta ${item.number_id}`,
+      );
+      return item;
+    } catch (error) {
+      this.logger.error(`Error al crear boton`, error);
+      return undefined;
+    }
   }
 
   async getInteractiveButtonsForAccount(numberId: string): Promise<any[]> {

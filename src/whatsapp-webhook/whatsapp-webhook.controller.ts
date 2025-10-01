@@ -24,10 +24,15 @@ interface WhatsAppMessage {
   timestamp: string;
   text?: { body: string };
   interactive?: {
-    type: string;
+    type: 'button_reply' | 'list_reply';
     button_reply?: {
       id: string;
       title: string;
+    };
+    list_reply?: {
+      id: string;
+      title: string;
+      description?: string;
     };
   };
   button?: {
@@ -247,16 +252,28 @@ export class WhatsappWebhookController implements OnModuleDestroy {
     }
 
     if (message.type === 'interactive' && message.interactive) {
-      this.logger.debug('Message is a button reply', {
-        messageId: message.id,
-        payload: message.interactive.button_reply?.id,
-        text: message.interactive.button_reply?.title,
-      });
-      return Promise.resolve({
-        type: 'button',
-        payload: message.interactive.button_reply?.id,
-        text: message.interactive.button_reply?.title,
-      });
+      const { interactive } = message;
+      let reply: any = null;
+
+      if (interactive.type === 'button_reply' && interactive.button_reply) {
+        reply = interactive.button_reply;
+      } else if (interactive.type === 'list_reply' && interactive.list_reply) {
+        reply = interactive.list_reply;
+      }
+
+      if (reply) {
+        this.logger.debug('Message is an interactive reply', {
+          messageId: message.id,
+          type: interactive.type,
+          payload: reply.id,
+          text: reply.title,
+        });
+        return Promise.resolve({
+          type: 'button',
+          payload: reply.id,
+          text: reply.title,
+        });
+      }
     }
     if (message.type === 'text' && message.text?.body) {
       const textBody = message.text.body;
@@ -609,11 +626,28 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         return;
       }
       if (reply.type === 'plantilla') {
-        await this.whatsappService.sendTemplateMessage(
-          message.from,
-          businessId,
-          reply.template || '',
+        const interactiveButtons =
+          await this.dynamoService.getInteractiveButtonsForAccount(businessId);
+        const buttonToSend = interactiveButtons.find(
+          (button) => button.name === reply.template,
         );
+
+        if (buttonToSend && buttonToSend.interactive) {
+          await this.whatsappService.sendInteractiveMessage(
+            message.from,
+            businessId,
+            buttonToSend.interactive,
+          );
+        } else {
+          this.logger.error(
+            `Botón interactivo "${reply.template}" no encontrado para businessId: ${businessId}`,
+          );
+          await this.whatsappService.sendMessage(
+            message.from,
+            businessId,
+            'Lo siento, no he podido encontrar la opción que solicitaste.',
+          );
+        }
       } else {
         await this.whatsappService.sendMessage(
           message.from,
