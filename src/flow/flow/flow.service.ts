@@ -1,7 +1,9 @@
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
+import { DynamoService } from 'src/database/dynamo/dynamo.service';
 
 const WELCOME_OPTIONS = [
   { id: 'ABOUT_US', title: 'Quienes Somos' },
@@ -207,7 +209,10 @@ export class FlowService {
   private readonly privateKey: string;
   private flowSessions: Record<string, any> = {};
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly dynamoService: DynamoService,
+  ) {
     const privateKey = this.configService.get<string>(
       'WHATSAPP_FLOW_PRIVATE_KEY',
     );
@@ -217,7 +222,7 @@ export class FlowService {
     this.privateKey = privateKey;
   }
 
-  processFlowData(body: any): Promise<string> {
+  async processFlowData(body: any): Promise<string> {
     const { aesKeyBuffer, initialVectorBuffer, decryptedBody } =
       this.decryptRequest(body, this.privateKey);
     this.logger.log(
@@ -353,16 +358,52 @@ export class FlowService {
             data: {
               details: `✅ *Selección de Póliza*
 ----------------------------------
-*Póliza escogida:* ${policyTitle}
-\nUn agente te contactará para finalizar la compra.`,
+*Póliza escogida:* ${policyTitle}`,
             },
           };
-        } else if (screen === 'MONTHLY' || screen === 'EXTERIOR') {
+        } else if (screen === 'MONTHLY') {
           const doc = data.doc;
-          const flowType =
-            screen === 'MONTHLY'
-              ? 'Pagar Mensualidad'
-              : 'Pensionados en el Exterior';
+          const flowType = 'Pago de Mensualidad';
+
+          this.logger.log(
+            `Recibido documento '${doc}' para el flujo '${flowType}'`,
+          );
+
+          const user = await this.dynamoService.findUser(doc);
+          console.log('user', user);
+          if (user) {
+            responseData = {
+              version,
+              screen: 'CONFIRM',
+              data: {
+                details: `✅ *Solicitud Recibida*
+----------------------------------
+Trámite: ${flowType}
+Documento: ${doc}
+Nombre: ${user.nombre}
+Valor a Pagar: $${user.pago.toLocaleString('es-CO')} COP
+                \n`,
+              },
+            };
+          } else {
+            responseData = {
+              version,
+              screen: 'CONFIRM',
+              data: {
+                details: `❌ Solicitud Rechazada*
+----------------------------------
+*Trámite:* ${flowType}
+*Documento:* ${doc}
+                \nTu documento no se encuentra en nuestra base de datos.\n\nTe invitamos a que adquieras uno de nuestros planes para poder acceder a este servicio.`,
+              },
+            };
+          }
+
+          // Aquí iría tu lógica para buscar el documento en la base de datos.
+          // Por ahora, solo confirmamos la recepción.
+        } else if (screen === 'EXTERIOR') {
+          const doc = data.value;
+          const flowType = 'Pensionados en el Exterior';
 
           this.logger.log(
             `Recibido documento '${doc}' para el flujo '${flowType}'`,
@@ -378,8 +419,7 @@ export class FlowService {
               details: `✅ *Solicitud Recibida*
 ----------------------------------
 *Trámite:* ${flowType}
-*Documento:* ${doc}
-\nEstamos procesando tu solicitud. Un agente se comunicará contigo.`,
+Pago de pensión por $290,000 COP\n`,
             },
           };
         } else if (screen === 'CONFIRM') {
