@@ -43,6 +43,10 @@ lerna-debug.log*
 .env.local
 .envJP
 
+# pem
+private.pem
+public.pem
+
 # temp directory
 .temp
 .tmp

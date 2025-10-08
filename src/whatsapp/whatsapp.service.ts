@@ -33,6 +33,54 @@ interface WhatsAppApiResponse {
   }>;
 }
 
+interface InteractiveButtonMessage {
+  type: 'button';
+  body: { text: string };
+  action: {
+    buttons: Array<{
+      type: 'reply';
+      reply: {
+        id: string;
+        title: string;
+      };
+    }>;
+  };
+}
+
+interface InteractiveListMessage {
+  type: 'list';
+  header?: {
+    type: 'text';
+    text: string;
+  };
+  body: {
+    text: string;
+  };
+  footer?: {
+    text: string;
+  };
+  action: {
+    button: string; // Texto del botón que abre la lista
+    sections: Array<{
+      title: string;
+      rows: Array<{
+        id: string;
+        title: string;
+        description?: string;
+      }>;
+    }>;
+  };
+}
+
+type InteractiveMessage = InteractiveButtonMessage | InteractiveListMessage;
+interface WhatsAppInteractiveMessageBody {
+  messaging_product: 'whatsapp';
+  recipient_type: 'individual';
+  to: string;
+  type: 'interactive';
+  interactive: InteractiveMessage;
+}
+
 @Injectable()
 export class WhatsappService {
   private readonly logger = new Logger(WhatsappService.name);
@@ -241,6 +289,48 @@ export class WhatsappService {
     }
   }
 
+  async sendInteractiveMessage(
+    to: string,
+    businessId: string,
+    interactiveMessage: InteractiveMessage,
+  ): Promise<WhatsAppApiResponse> {
+    const whatsappToken = await this.getWhatsappToken(businessId);
+
+    const body: WhatsAppInteractiveMessageBody = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: to.replace(/\D/g, ''),
+      type: 'interactive',
+      interactive: interactiveMessage,
+    };
+
+    this.logger.log(`Enviando mensaje interactivo a: ${to}`);
+    const apiUrl = `https://graph.facebook.com/v23.0/${businessId}/messages`;
+
+    // (Puedes reutilizar la lógica de reintentos de tus otras funciones de envío)
+    try {
+      const response: AxiosResponse<WhatsAppApiResponse> = await axios.post(
+        apiUrl,
+        body,
+        {
+          headers: {
+            Authorization: `Bearer ${whatsappToken}`,
+            'Content-Type': 'application/json',
+          },
+        },
+      );
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        this.handleAxiosError(error, 1);
+      }
+      throw new HttpException(
+        'Error inesperado al enviar mensaje interactivo',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   async sendTemplateMessage(
     to: string,
     businessId: string,
@@ -353,6 +443,135 @@ export class WhatsappService {
     }
   }
 
+  async sendFlowMessage(
+    to: string,
+    businessId: string,
+  ): Promise<WhatsAppApiResponse> {
+    try {
+      // Validate inputs
+      const whatsappToken = await this.getWhatsappToken(businessId);
+
+      const payload = {
+        messaging_product: 'whatsapp',
+        to: to,
+        type: 'interactive',
+        interactive: {
+          type: 'flow',
+          header: {
+            type: 'text',
+            text: 'Bienvenido a Afiliamos',
+          },
+          body: {
+            text: '¡Hola! Toca el botón de abajo para explorar nuestros servicios en el menú interactivo.',
+          },
+          footer: {
+            text: 'Tu aliado en seguridad social.',
+          },
+          action: {
+            name: 'flow',
+            parameters: {
+              flow_message_version: '3',
+              flow_id: '1340184727745283',
+              flow_token: `token_${to}_${businessId}_${Date.now()}`,
+              flow_cta: '▶️ Abrir Menú',
+              flow_action: 'navigate',
+              flow_action_payload: {
+                screen: 'WELCOME',
+              },
+            },
+          },
+        },
+      };
+
+      this.logger.log(
+        `Enviando mensaje de plantilla WhatsApp a : ${JSON.stringify(payload)}`,
+      );
+
+      const apiUrl = `https://graph.facebook.com/v23.0/${businessId}/messages`;
+
+      let lastError: Error | undefined;
+
+      for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
+        try {
+          const response: AxiosResponse<WhatsAppApiResponse> = await axios.post(
+            apiUrl,
+            payload,
+            {
+              headers: {
+                Authorization: `Bearer ${whatsappToken}`,
+                'Content-Type': 'application/json',
+              },
+              timeout: 5000, // 10 seconds timeout
+            },
+          );
+          return response.data;
+        } catch (error) {
+          lastError = error as Error;
+
+          if (axios.isAxiosError(error)) {
+            // Don't retry on client errors (4xx) except 429
+            const status = error.response?.status;
+            if (status && status >= 400 && status < 500 && status !== 429) {
+              this.handleAxiosError(error, attempt);
+            }
+
+            // Retry on server errors (5xx) and 429
+            if (
+              attempt < this.maxRetries &&
+              (status === 429 || (status && status >= 500))
+            ) {
+              const delayMs = this.retryDelay * Math.pow(2, attempt - 1); // Exponential backoff
+              this.logger.warn(
+                `Reintentando envío de mensaje WhatsApp en ${delayMs}ms (Intento ${attempt}/${this.maxRetries})`,
+              );
+              await this.delay(delayMs);
+              continue;
+            }
+
+            this.handleAxiosError(error, attempt);
+          } else {
+            // Non-Axios error
+            if (attempt < this.maxRetries) {
+              const delayMs = this.retryDelay * attempt;
+              const errorMessage =
+                error instanceof Error ? error.message : String(error);
+              this.logger.warn(
+                `Error no-HTTP, reintentando en ${delayMs}ms (Intento ${attempt}/${this.maxRetries}): ${errorMessage}`,
+              );
+              await this.delay(delayMs);
+              continue;
+            }
+          }
+        }
+      }
+
+      // If we get here, all retries failed
+      const errorMessage = lastError?.message || 'Error desconocido';
+      this.logger.error(
+        `Falló el envío de mensaje WhatsApp después de ${this.maxRetries} intentos: ${errorMessage}`,
+      );
+      throw new HttpException(
+        `Error al enviar mensaje WhatsApp después de ${this.maxRetries} intentos: ${errorMessage}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    } catch (error) {
+      // Re-throw HttpExceptions as-is
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      // Handle unexpected errors
+      this.logger.error(
+        `Error inesperado en sendMessage: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+
+      throw new HttpException(
+        'Error interno del servidor al procesar mensaje WhatsApp',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
   private streamToBuffer(stream: Readable): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       const chunks: Buffer[] = [];

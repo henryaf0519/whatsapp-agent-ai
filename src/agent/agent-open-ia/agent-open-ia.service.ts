@@ -28,7 +28,7 @@ interface payLoad {
 }
 
 interface sendWhastappResponse {
-  type: 'plantilla' | 'texto' | 'audio';
+  type: 'plantilla' | 'texto' | 'audio' | 'flow';
   template?: string;
   text?: string;
 }
@@ -649,8 +649,7 @@ export class AgentOpenIaService implements OnModuleInit {
       updatedActions,
     );
 
-    // Verificar la acción del botón y devolver la respuesta adecuada
-    if (payload.action !== 'Pagar mensualidad') {
+    if (payload.action !== 'opcion_4') {
       return {
         type: resp.type === 'plantilla' ? 'plantilla' : 'texto',
         template: resp.template ?? '',
@@ -800,8 +799,7 @@ export class AgentOpenIaService implements OnModuleInit {
         actions,
       );
 
-      // Retornar respuesta con plantilla de bienvenida
-      return { type: 'plantilla', template: 'bienvenida_inicial', text: '' };
+      return { type: 'flow', template: 'bienvenida_inicial', text: '' };
     }
 
     if (payload.type === 'button') {
@@ -860,7 +858,7 @@ export class AgentOpenIaService implements OnModuleInit {
             activityEconomic: 'Dependiente',
           },
         };
-      case 'Precios Seguridad Social': {
+      case 'opcion_2': {
         return {
           type: 'plantilla',
           template: 'economicactivity',
@@ -965,7 +963,7 @@ export class AgentOpenIaService implements OnModuleInit {
           text: resp,
         };
       }
-      case 'Quienes Somos': {
+      case 'opcion_1': {
         const resp = await this.dynamoService.findPolicies(`about`);
         return {
           type: 'text',
@@ -973,7 +971,7 @@ export class AgentOpenIaService implements OnModuleInit {
           text: resp,
         };
       }
-      case 'Pension Exterior':
+      case 'opcion_5':
         return {
           type: 'plantilla',
           template: 'pension',
@@ -983,7 +981,7 @@ export class AgentOpenIaService implements OnModuleInit {
             activityEconomic: '',
           },
         };
-      case 'Polizas Incapacidad': {
+      case 'opcion_3': {
         const resp = await this.dynamoService.findPolicies(`poliza`);
         return {
           type: 'text',

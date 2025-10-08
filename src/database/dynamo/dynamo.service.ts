@@ -1041,4 +1041,51 @@ export class DynamoService {
       return undefined;
     }
   }
+
+  async createInteractiveButton(
+    businessId: string,
+    buttonData: any,
+  ): Promise<any> {
+    const item = {
+      number_id: businessId,
+      SK: `INTERACTIVE_BUTTON#${buttonData.name}`,
+      ...buttonData,
+      createdAt: new Date().toISOString(),
+    };
+
+    const command = new PutCommand({
+      TableName: 'InteractiveButtons',
+      Item: item,
+      ConditionExpression: 'attribute_not_exists(SK)',
+    });
+
+    try {
+      await this.docClient.send(command);
+      this.logger.log(
+        `Botón interactivo creado: ${item.SK} para la cuenta ${item.number_id}`,
+      );
+      return item;
+    } catch (error) {
+      this.logger.error(`Error al crear boton`, error);
+      return undefined;
+    }
+  }
+
+  async getInteractiveButtonsForAccount(numberId: string): Promise<any[]> {
+    const command = new QueryCommand({
+      TableName: 'InteractiveButtons',
+      KeyConditionExpression: 'number_id = :numberId',
+      FilterExpression: 'begins_with(SK, :skPrefix)',
+      ExpressionAttributeValues: {
+        ':numberId': numberId,
+        ':skPrefix': 'INTERACTIVE_BUTTON#',
+      },
+    });
+
+    const response = await this.docClient.send(command);
+    this.logger.log(
+      `Se encontraron ${response.Items?.length || 0} botones para la cuenta ${numberId}`,
+    );
+    return response.Items || [];
+  }
 }
