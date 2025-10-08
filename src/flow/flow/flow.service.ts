@@ -232,9 +232,14 @@ export class FlowService {
     );
     let responseData;
     const { version, action, screen, data, flow_token } = decryptedBody;
-    const tokenParts = flow_token.split('_');
-    const userNumber = tokenParts.length > 1 ? tokenParts[1] : null;
-    const businessId = tokenParts.length > 2 ? tokenParts[2] : null;
+    let tokenParts: string[];
+    let userNumber: string = '';
+    let businessId: string = '';
+    if (action !== 'ping') {
+      tokenParts = flow_token.split('_');
+      userNumber = tokenParts.length > 1 ? tokenParts[1] : '';
+      businessId = tokenParts.length > 2 ? tokenParts[2] : 'null';
+    }
 
     switch (action) {
       case 'ping':

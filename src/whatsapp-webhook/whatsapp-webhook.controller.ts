@@ -588,7 +588,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         threadId,
         payload as payLoad,
       );
-      this.logger.debug('Chatbot reply', JSON.stringify(reply, null, 2));
+
       let messageResp = '';
       if (reply.type === 'plantilla') {
         messageResp = reply.template ?? 'Plantilla sin nombre';
