@@ -648,6 +648,10 @@ export class WhatsappWebhookController implements OnModuleDestroy {
             'Lo siento, no he podido encontrar la opción que solicitaste.',
           );
         }
+      } else if (reply.type === 'flow') {
+        this.logger.log('Iniciando flow:', reply.template);
+
+        await this.whatsappService.sendFlowMessage(message.from, businessId);
       } else {
         await this.whatsappService.sendMessage(
           message.from,

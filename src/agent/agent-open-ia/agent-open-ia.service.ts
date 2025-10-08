@@ -28,7 +28,7 @@ interface payLoad {
 }
 
 interface sendWhastappResponse {
-  type: 'plantilla' | 'texto' | 'audio';
+  type: 'plantilla' | 'texto' | 'audio' | 'flow';
   template?: string;
   text?: string;
 }
@@ -799,7 +799,7 @@ export class AgentOpenIaService implements OnModuleInit {
         actions,
       );
 
-      return { type: 'plantilla', template: 'bienvenida_inicial', text: '' };
+      return { type: 'flow', template: 'bienvenida_inicial', text: '' };
     }
 
     if (payload.type === 'button') {
