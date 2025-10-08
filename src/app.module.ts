@@ -13,12 +13,12 @@ import { DatabaseModule } from './database/database.module';
 import { ConversationLogModule } from './conversation-log/conversation-log.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { SemanticCacheService } from './semantic-cache/semantic-cache.service';
-import { SocketGateway } from './socket/socket.gateway';
 import { AuthModule } from './auth/auth.module';
 import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { TranscriptionModule } from './transcription/transcription.module';
 import { BulkMessagingModule } from './bulk-messaging/bulk-messaging.module';
 import { FlowModule } from './flow/flow.module';
+import { SocketModule } from './socket/socket.module';
 
 @Module({
   imports: [
@@ -33,6 +33,7 @@ import { FlowModule } from './flow/flow.module';
     TranscriptionModule,
     BulkMessagingModule,
     FlowModule,
+    SocketModule,
   ],
   controllers: [
     AppController,
@@ -47,7 +48,6 @@ import { FlowModule } from './flow/flow.module';
     PruebaService,
     AgentOpenIaService,
     SemanticCacheService,
-    SocketGateway,
   ],
 })
 export class AppModule {}

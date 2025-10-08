@@ -4,6 +4,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 import { DynamoService } from 'src/database/dynamo/dynamo.service';
+import { SocketGateway } from 'src/socket/socket.gateway';
 
 const WELCOME_OPTIONS = [
   { id: 'ABOUT_US', title: 'Quienes Somos' },
@@ -212,6 +213,7 @@ export class FlowService {
   constructor(
     private readonly configService: ConfigService,
     private readonly dynamoService: DynamoService,
+    private readonly socketGateway: SocketGateway,
   ) {
     const privateKey = this.configService.get<string>(
       'WHATSAPP_FLOW_PRIVATE_KEY',
@@ -230,6 +232,9 @@ export class FlowService {
     );
     let responseData;
     const { version, action, screen, data, flow_token } = decryptedBody;
+    const tokenParts = flow_token.split('_');
+    const userNumber = tokenParts.length > 1 ? tokenParts[1] : null;
+    const businessId = tokenParts.length > 2 ? tokenParts[2] : null;
 
     switch (action) {
       case 'ping':
@@ -279,7 +284,6 @@ export class FlowService {
               ...ALL_PRICE_OPTIONS,
             };
           } else if (nextScreen === 'POLICIES') {
-            // NUEVO: Lógica para la pantalla de Pólizas
             screenData = {
               policies_options: POLICIES_OPTIONS,
             };
@@ -341,6 +345,7 @@ export class FlowService {
 *Dirección:* ${allData.direccion || ''}`,
             },
           };
+          this.saveMessage(businessId, userNumber, responseData);
 
           // NUEVO: Lógica para las nuevas pantallas
         } else if (screen === 'POLICIES') {
@@ -351,7 +356,6 @@ export class FlowService {
 
           this.logger.log(`Usuario seleccionó la póliza: ${policyTitle}`);
 
-          // Este flujo es simple y va directo a la confirmación
           responseData = {
             version,
             screen: 'CONFIRM',
@@ -361,6 +365,8 @@ export class FlowService {
 *Póliza escogida:* ${policyTitle}`,
             },
           };
+
+          this.saveMessage(businessId, userNumber, responseData);
         } else if (screen === 'MONTHLY') {
           const doc = data.doc;
           const flowType = 'Pago de Mensualidad';
@@ -385,6 +391,7 @@ Valor a Pagar: $${user.pago.toLocaleString('es-CO')} COP
                 \n`,
               },
             };
+            this.saveMessage(businessId, userNumber, responseData);
           } else {
             responseData = {
               version,
@@ -397,6 +404,7 @@ Valor a Pagar: $${user.pago.toLocaleString('es-CO')} COP
                 \nTu documento no se encuentra en nuestra base de datos.\n\nTe invitamos a que adquieras uno de nuestros planes para poder acceder a este servicio.`,
               },
             };
+            this.saveMessage(businessId, userNumber, responseData);
           }
 
           // Aquí iría tu lógica para buscar el documento en la base de datos.
@@ -422,6 +430,7 @@ Valor a Pagar: $${user.pago.toLocaleString('es-CO')} COP
 Pago de pensión por $290,000 COP\n`,
             },
           };
+          this.saveMessage(businessId, userNumber, responseData);
         } else if (screen === 'CONFIRM') {
           this.logger.log(
             `Flujo completado por el usuario desde la pantalla CONFIRM.`,
@@ -508,5 +517,34 @@ Pago de pensión por $290,000 COP\n`,
       cipher.final(),
       cipher.getAuthTag(),
     ]).toString('base64');
+  }
+
+  private async saveMessage(
+    businessId: string,
+    userNumber: string,
+    responseData: any,
+  ) {
+    await this.dynamoService.saveMessage(
+      businessId,
+      userNumber,
+      userNumber,
+      responseData.data.details || '',
+      '',
+      'RECEIVED',
+      'respflow',
+      '',
+    );
+    const sendSocketUser = {
+      from: userNumber,
+      text: responseData.data.details || '',
+      type: 'respflow',
+      url: '',
+      SK: `MESSAGE#${new Date().toISOString()}`,
+    };
+    this.socketGateway.sendNewMessageNotification(
+      businessId,
+      userNumber,
+      sendSocketUser,
+    );
   }
 }

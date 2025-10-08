@@ -472,7 +472,7 @@ export class WhatsappService {
             parameters: {
               flow_message_version: '3',
               flow_id: '1315739563434392',
-              flow_token: `token_${to}_${Date.now()}`,
+              flow_token: `token_${to}_${businessId}_${Date.now()}`,
               flow_cta: '▶️ Abrir Menú',
               flow_action: 'navigate',
               flow_action_payload: {

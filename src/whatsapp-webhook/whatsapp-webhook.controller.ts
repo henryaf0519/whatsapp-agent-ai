@@ -588,10 +588,17 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         threadId,
         payload as payLoad,
       );
-      const messageResp =
-        reply.type === 'plantilla'
-          ? (reply.template ?? '')
-          : (reply.text ?? '');
+      this.logger.debug('Chatbot reply', JSON.stringify(reply, null, 2));
+      let messageResp = '';
+      if (reply.type === 'plantilla') {
+        messageResp = reply.template ?? 'Plantilla sin nombre';
+      } else if (reply.type === 'flow') {
+        // Asignamos un texto descriptivo para el mensaje de tipo Flow
+        messageResp =
+          'Inicio de Flujo: ¡Hola! Toca el botón de abajo para explorar nuestros servicios en el menú interactivo.';
+      } else {
+        messageResp = reply.text ?? '';
+      }
 
       await this.dynamoService.saveMessage(
         businessId,
