@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import {
   Controller,
@@ -572,7 +573,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         message.from,
         'IA',
       );
-      const chatMode = await this.dynamoService.getChatMode(
+      /*const chatMode = await this.dynamoService.getChatMode(
         businessId,
         message.from,
       );
@@ -582,15 +583,19 @@ export class WhatsappWebhookController implements OnModuleDestroy {
           `Chat ${message.from} está en control humano. La IA no responderá.`,
         );
         return;
-      }
+      }*/
 
       const reply = await this.chatbotService.hablar(
         threadId,
         payload as payLoad,
       );
 
-      let messageResp = '';
-      if (reply.type === 'plantilla') {
+      if (!reply) {
+        this.logger.log(`No reply from chatbot for user ${threadId}.`);
+        return;
+      }
+      const messageResp = '';
+      /*   if (reply.type === 'plantilla') {
         messageResp = reply.template ?? 'Plantilla sin nombre';
       } else if (reply.type === 'flow') {
         // Asignamos un texto descriptivo para el mensaje de tipo Flow
@@ -598,7 +603,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
           'Inicio de Flujo: ¡Hola! Toca el botón de abajo para explorar nuestros servicios en el menú interactivo.';
       } else {
         messageResp = reply.text ?? '';
-      }
+      }*/
 
       await this.dynamoService.saveMessage(
         businessId,

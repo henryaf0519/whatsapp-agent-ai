@@ -775,7 +775,7 @@ export class AgentOpenIaService implements OnModuleInit {
     return agentResponse; // Devolver la respuesta final del agente
   }
 
-  async hablar(
+  /*async hablar(
     userId: string,
     payload: payLoad,
   ): Promise<sendWhastappResponse> {
@@ -830,6 +830,36 @@ export class AgentOpenIaService implements OnModuleInit {
     );
 
     return { type: 'texto', template: '', text: agentResponse };
+  }*/
+
+  async hablar(
+    userId: string,
+    payload: payLoad,
+  ): Promise<sendWhastappResponse | null> {
+    const { userHistory, actions, timestamp } =
+      await this.getConversationData(userId);
+    const currentTime = new Date().getTime();
+    const lastMessageTime = userHistory ? new Date(timestamp).getTime() : 0;
+    const timeDifference = (currentTime - lastMessageTime) / 1000 / 60;
+
+    if (timeDifference > 5 || !userHistory) {
+      // Si han pasado más de 10 minutos o no hay historial, iniciar nueva conversación
+      const updatedUserHistory = `AI: Hola Bienvenido a Afiliamos\n`;
+
+      // Guardar el historial actualizado en la base de datos
+      await this.dynamoService.saveConversationHistory(
+        userId,
+        updatedUserHistory,
+        actions,
+      );
+
+      return { type: 'flow', template: 'bienvenida_inicial', text: '' };
+    }
+
+    this.logger.log(
+      `User ${userId} is in an active conversation. AI will not respond.`,
+    );
+    return null;
   }
 
   private async validateMessagePayload(

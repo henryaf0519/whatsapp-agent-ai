@@ -44,6 +44,7 @@ export class DynamoController {
   }
 
   @Post('control/:conversationId')
+  @UseGuards(AuthGuard('jwt'))
   updateChatMode(
     @Param('conversationId') conversationId: string,
     @Body('newMode') newMode: 'IA' | 'humano',
