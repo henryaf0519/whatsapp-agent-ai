@@ -22,6 +22,7 @@ const ECONOMIC_ACTIVITY = [
       payload: {
         independent_options_visibility: true,
         dependent_options_visibility: false,
+        is_selection_complete: false,
         dependent_h: false,
         dependent_hr: false,
         dependent_hrp: false,
@@ -40,6 +41,7 @@ const ECONOMIC_ACTIVITY = [
       payload: {
         independent_options_visibility: false,
         dependent_options_visibility: true,
+        is_selection_complete: false,
         dependent_h: false,
         dependent_hr: false,
         dependent_hrp: false,
@@ -57,7 +59,11 @@ const INDEPENDENT_OPTIONS = [
     title: 'Salud, Riesgo (Pensionados)',
     'on-select-action': {
       name: 'update_data',
-      payload: { independent_hr: true, independent_hrp: false },
+      payload: {
+        independent_hr: true,
+        independent_hrp: false,
+        is_selection_complete: false,
+      },
     },
   },
   {
@@ -65,7 +71,11 @@ const INDEPENDENT_OPTIONS = [
     title: 'Salud, Riesgo y Pensión',
     'on-select-action': {
       name: 'update_data',
-      payload: { independent_hr: false, independent_hrp: true },
+      payload: {
+        independent_hr: false,
+        independent_hrp: true,
+        is_selection_complete: false,
+      },
     },
   },
 ];
@@ -274,6 +284,7 @@ export class FlowService {
 
           if (nextScreen === 'PRODUCTS') {
             screenData = {
+              is_selection_complete: false,
               independent_options_visibility: false,
               dependent_options_visibility: false,
               dependent_h: false,
