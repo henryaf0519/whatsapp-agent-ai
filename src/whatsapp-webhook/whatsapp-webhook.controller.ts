@@ -573,7 +573,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         message.from,
         'IA',
       );
-      const chatMode = await this.dynamoService.getChatMode(
+      /*const chatMode = await this.dynamoService.getChatMode(
         businessId,
         message.from,
       );
@@ -583,7 +583,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
           `Chat ${message.from} está en control humano. La IA no responderá.`,
         );
         return;
-      }
+      }*/
 
       const reply = await this.chatbotService.hablar(
         threadId,
