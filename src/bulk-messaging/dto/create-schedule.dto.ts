@@ -1,4 +1,5 @@
 // src/bulk-messaging/dto/create-schedule.dto.ts
+import { Type } from 'class-transformer';
 import {
   IsNotEmpty,
   IsString,
@@ -6,31 +7,44 @@ import {
   IsDateString,
   IsOptional,
   IsIn,
+  ValidateNested,
 } from 'class-validator';
 
-export class CreateScheduleDto {
+class PhoneNumberDto {
   @IsString()
   @IsNotEmpty()
   name!: string;
 
   @IsString()
   @IsNotEmpty()
-  message!: string;
+  number!: string;
+}
 
+export class CreateScheduleDto {
+  @IsString()
+  @IsNotEmpty()
+  name!: string;
+
+  // 2. Se añade 'templateName' que es el campo que realmente enviamos ahora.
+  @IsString()
+  @IsNotEmpty()
+  templateName!: string;
+
+  // 3. Se valida que 'phoneNumbers' sea un array de los objetos que definimos arriba.
   @IsArray()
-  @IsString({ each: true })
-  @IsNotEmpty({ each: true })
-  phoneNumbers!: string[];
+  @ValidateNested({ each: true })
+  @Type(() => PhoneNumberDto)
+  phoneNumbers!: PhoneNumberDto[];
 
   @IsIn(['once', 'recurring'])
   @IsNotEmpty()
   scheduleType!: 'once' | 'recurring';
 
-  @IsDateString()
+  @IsString()
   @IsOptional()
-  sendAt?: string; // Para envíos únicos (formato ISO 8601)
+  sendAt?: string;
 
   @IsString()
   @IsOptional()
-  cronExpression?: string; // Para envíos recurrentes (ej: '0 0 * * 1-5')
+  cronExpression?: string;
 }
