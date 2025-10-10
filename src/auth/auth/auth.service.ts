@@ -17,8 +17,6 @@ export class AuthService {
   ) {}
 
   async validateUser(email: string, pass: string): Promise<any> {
-    console.log('email: ', email);
-    console.log('pass: ', pass);
     const user = await this.dynamoService.findUserByEmail(email);
     console.log('user: ', user);
     if (!user) {
@@ -53,12 +51,25 @@ export class AuthService {
 
     if (user.waba_id && user.whatsapp_token) {
       this.logger.log(
-        `Sincronizando y obteniendo plantillas para ${user.email}`,
+        `Obteniendo plantillas directamente desde la API para ${user.email}`,
       );
-      await this.syncUserTemplates(user.waba_id, user.whatsapp_token);
-      userTemplates = await this.dynamoService.getTemplatesForAccount(
-        user.waba_id,
-      );
+      try {
+        // 1. Obtenemos las plantillas directamente desde el servicio de WhatsApp
+        userTemplates = await this.whatsappService.getMessageTemplates(
+          user.waba_id,
+          user.whatsapp_token,
+        );
+        this.logger.log(
+          'Plantillas obtenidas desde la API: ',
+          JSON.stringify(userTemplates, null, 2),
+        );
+      } catch (error) {
+        this.logger.error(
+          `Falló la obtención de plantillas para ${user.email}`,
+          error,
+        );
+        userTemplates = [];
+      }
     } else {
       this.logger.warn(
         `El usuario ${user.email} no tiene waba_id o token. No se devolverán plantillas.`,
