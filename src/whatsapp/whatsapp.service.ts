@@ -13,6 +13,7 @@ import axios, { AxiosError, AxiosResponse } from 'axios';
 import { S3ConversationLogService } from 'src/conversation-log/s3-conversation-log.service';
 import { Readable } from 'stream';
 import { DynamoService } from 'src/database/dynamo/dynamo.service';
+import FormData from 'form-data';
 
 interface WhatsAppMessageBody {
   messaging_product: string;
@@ -335,6 +336,8 @@ export class WhatsappService {
     to: string,
     businessId: string,
     templateName: string,
+    languageCode: string,
+    components: any[],
   ): Promise<WhatsAppApiResponse> {
     try {
       // Validate inputs
@@ -348,8 +351,10 @@ export class WhatsappService {
         template: {
           name: templateName,
           language: {
-            code: 'es_CO', // O "es" si la plantilla está en español
+            code: languageCode,
           },
+          ...(components &&
+            components.length > 0 && { components: components }),
         },
       };
 
@@ -373,6 +378,9 @@ export class WhatsappService {
               },
               timeout: 5000, // 10 seconds timeout
             },
+          );
+          this.logger.log(
+            `Respuesta de WhatsApp: ${JSON.stringify(response.data)}`,
           );
           return response.data;
         } catch (error) {
@@ -572,6 +580,30 @@ export class WhatsappService {
       );
     }
   }
+
+  async getTemplateById(templateId: string, businessId: string): Promise<any> {
+    try {
+      const whatsappToken = await this.getWhatsappToken(businessId);
+      const apiUrl = `https://graph.facebook.com/v22.0/${templateId}`;
+
+      this.logger.log(`Obteniendo plantilla por ID: ${templateId}`);
+
+      const response = await axios.get(apiUrl, {
+        headers: { Authorization: `Bearer ${whatsappToken}` },
+      });
+
+      return response.data;
+    } catch (error) {
+      this.logger.error(
+        `Error al obtener la plantilla por ID "${templateId}"`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw new HttpException(
+        'No se pudo obtener la plantilla de WhatsApp.',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
   private streamToBuffer(stream: Readable): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       const chunks: Buffer[] = [];
@@ -742,6 +774,50 @@ export class WhatsappService {
         error as any,
       );
       throw new Error('Error al subir el archivo a S3.');
+    }
+  }
+
+  async uploadMedia(
+    businessId: string,
+    mediaBuffer: Buffer,
+    contentType: string,
+  ): Promise<string> {
+    try {
+      const whatsappToken = await this.getWhatsappToken(businessId); // Asumo que tienes un método para obtener el token
+      const apiUrl = `https://graph.facebook.com/v22.0/${businessId}/media`;
+
+      const form = new FormData();
+      form.append('messaging_product', 'whatsapp');
+      form.append('file', mediaBuffer, {
+        contentType,
+        filename: 'template-header.png', // El nombre del archivo es irrelevante
+      });
+
+      this.logger.log(`Subiendo archivo multimedia para ${businessId}...`);
+
+      const response = await axios.post(apiUrl, form, {
+        headers: {
+          ...form.getHeaders(),
+          Authorization: `Bearer ${whatsappToken}`,
+        },
+      });
+
+      if (response.data && response.data.id) {
+        this.logger.log(
+          `Archivo multimedia subido exitosamente. Media ID: ${response.data.id}`,
+        );
+        return response.data.id;
+      } else {
+        throw new Error(
+          'La respuesta de la API de subida de medios no contenía un ID.',
+        );
+      }
+    } catch (error) {
+      this.logger.error(
+        'Error al subir el archivo multimedia a WhatsApp',
+        error instanceof Error ? error.stack : undefined,
+      );
+      this.handleAxiosError(error as AxiosError, 1); // Reutiliza tu manejador de errores si lo tienes
     }
   }
 
