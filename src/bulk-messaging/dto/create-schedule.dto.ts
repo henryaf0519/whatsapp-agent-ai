@@ -1,12 +1,22 @@
-// src/bulk-messaging/dto/create-schedule.dto.ts
+import { Type } from 'class-transformer';
 import {
-  IsNotEmpty,
   IsString,
+  IsNotEmpty,
   IsArray,
-  IsDateString,
   IsOptional,
   IsIn,
+  ValidateNested,
 } from 'class-validator';
+
+class PhoneNumberDto {
+  @IsString()
+  @IsNotEmpty()
+  name!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  number!: string;
+}
 
 export class CreateScheduleDto {
   @IsString()
@@ -15,22 +25,34 @@ export class CreateScheduleDto {
 
   @IsString()
   @IsNotEmpty()
-  message!: string;
+  templateName!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  templateId!: string;
 
   @IsArray()
-  @IsString({ each: true })
-  @IsNotEmpty({ each: true })
-  phoneNumbers!: string[];
+  @ValidateNested({ each: true })
+  @Type(() => PhoneNumberDto)
+  phoneNumbers!: PhoneNumberDto[];
 
   @IsIn(['once', 'recurring'])
   @IsNotEmpty()
   scheduleType!: 'once' | 'recurring';
 
-  @IsDateString()
-  @IsOptional()
-  sendAt?: string; // Para envíos únicos (formato ISO 8601)
+  @IsString()
+  @IsNotEmpty()
+  waba_id!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  number_id!: string;
 
   @IsString()
   @IsOptional()
-  cronExpression?: string; // Para envíos recurrentes (ej: '0 0 * * 1-5')
+  sendAt?: string;
+
+  @IsString()
+  @IsOptional()
+  cronExpression?: string;
 }
