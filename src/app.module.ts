@@ -19,6 +19,7 @@ import { TranscriptionModule } from './transcription/transcription.module';
 import { BulkMessagingModule } from './bulk-messaging/bulk-messaging.module';
 import { FlowModule } from './flow/flow.module';
 import { SocketModule } from './socket/socket.module';
+import { WhatsappTemplatesModule } from './whatsapp-templates/whatsapp-templates.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { SocketModule } from './socket/socket.module';
     BulkMessagingModule,
     FlowModule,
     SocketModule,
+    WhatsappTemplatesModule,
   ],
   controllers: [
     AppController,

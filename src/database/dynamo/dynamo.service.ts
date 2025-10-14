@@ -964,14 +964,9 @@ export class DynamoService {
     const dueSchedules = Items.filter((schedule) => {
       if (schedule.scheduleType === 'once' && schedule.sendAt) {
         // 1. Leemos la fecha UTC y la convertimos a un objeto Moment en la zona de Bogotá
-        const sendAtDate = new Date(schedule.sendAt);
-        return (
-          sendAtDate.getFullYear() === now.getFullYear() &&
-          sendAtDate.getMonth() === now.getMonth() &&
-          sendAtDate.getDate() === now.getDate() &&
-          sendAtDate.getHours() === now.getHours() &&
-          sendAtDate.getMinutes() === now.getMinutes()
-        );
+        const nowMomentUtc = moment.utc(now);
+        const sendAtMomentUtc = moment.utc(schedule.sendAt);
+        return sendAtMomentUtc.isSame(nowMomentUtc, 'minute');
       }
 
       if (schedule.scheduleType === 'recurring' && schedule.cronExpression) {
