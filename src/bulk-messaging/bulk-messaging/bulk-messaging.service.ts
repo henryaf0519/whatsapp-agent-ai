@@ -9,6 +9,7 @@ import { WhatsappService } from '../../whatsapp/whatsapp.service';
 import { CreateScheduleDto } from '../dto/create-schedule.dto';
 import { v4 as uuidv4 } from 'uuid';
 import axios from 'axios';
+import { SocketGateway } from 'src/socket/socket.gateway';
 
 interface Contact {
   name: string;
@@ -33,6 +34,7 @@ export class BulkMessagingService {
   constructor(
     private readonly dynamoService: DynamoService,
     private readonly whatsappService: WhatsappService,
+    private readonly socketGateway: SocketGateway,
   ) {
     this.logger.log(`¡BulkMessagingService inicializado! ID de instancia: `);
   }
@@ -138,8 +140,6 @@ export class BulkMessagingService {
           schedule.number_id,
         );
         let mediaId: string | undefined = undefined;
-
-        // --- LÓGICA DE SUBIDA DE IMAGEN ---
         const headerComponent = template.components.find(
           (c) =>
             c.type === 'HEADER' &&
@@ -150,14 +150,12 @@ export class BulkMessagingService {
         if (headerComponent && headerComponent.example?.header_handle?.[0]) {
           const temporaryUrl = headerComponent.example.header_handle[0];
 
-          // 1. Descargar la imagen desde la URL temporal
           const response = await axios.get(temporaryUrl, {
             responseType: 'arraybuffer',
           });
           const imageBuffer = Buffer.from(response.data);
           const contentType = response.headers['content-type'];
 
-          // 2. Subirla a WhatsApp y obtener el ID
           mediaId = await this.whatsappService.uploadMedia(
             schedule.number_id,
             imageBuffer,
@@ -172,12 +170,34 @@ export class BulkMessagingService {
             mediaId,
           );
 
-          await this.whatsappService.sendTemplateMessage(
+          const whatsAppResponse = await this.whatsappService.sendTemplateMessage(
             contact.number,
             schedule.number_id,
             template.name,
             template.language,
             components,
+          );
+          const messageId = whatsAppResponse.messages[0].id;
+          await this.dynamoService.saveMessage(
+            schedule.number_id,
+            contact.number,
+            'IA',
+            template.name,
+            messageId,
+            'SEND',
+            'plantilla',
+          );
+          const socketMessage = {
+            from: 'IA',
+            text: template.name,
+            type: 'plantilla',
+            SK: `MESSAGE#${new Date().toISOString()}`,
+          };
+
+          this.socketGateway.sendNewMessageNotification(
+            schedule.number_id,
+            contact.number,
+            socketMessage,
           );
         }
 
@@ -191,7 +211,7 @@ export class BulkMessagingService {
           `Falló el procesamiento de la campaña "${schedule.name}". Causa: ${errorMessage}`,
           errorStack,
         );
-        await this.dynamoService.deactivateSchedule(schedule.scheduleId); // Desactivar en caso de error
+        await this.dynamoService.deactivateSchedule(schedule.scheduleId);
       }
     }
   }
