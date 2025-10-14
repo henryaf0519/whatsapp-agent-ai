@@ -12,6 +12,7 @@ const WELCOME_OPTIONS = [
   { id: 'POLICIES', title: 'Polizas de Incapacidad' },
   { id: 'MONTHLY', title: 'Pagar Mensualidad' },
   { id: 'EXTERIOR', title: 'No pensionados en el exterior' },
+  { id: 'ASESOR', title: 'Hablar con un Asesor' },
 ];
 const ECONOMIC_ACTIVITY = [
   {
@@ -207,10 +208,11 @@ const ALL_PRICE_OPTIONS = {
 };
 
 const ALL_OPTIONS = [
+  ...WELCOME_OPTIONS,
   ...ECONOMIC_ACTIVITY,
   ...INDEPENDENT_OPTIONS,
   ...DEPENDENT_OPTIONS,
-  ...POLICIES_OPTIONS, // NUEVO: Añadido para la traducción
+  ...POLICIES_OPTIONS,
   ...Object.values(ALL_PRICE_OPTIONS).flat(),
 ];
 
@@ -444,6 +446,21 @@ Valor a Pagar: $${user.pago.toLocaleString('es-CO')} COP
 ----------------------------------
 *Trámite:* ${flowType}
 Pago de pensión por $290,000 COP\n`,
+            },
+          };
+          this.saveMessage(businessId, userNumber, responseData);
+        } else if (screen === 'ASESOR') {
+          // <--- AÑADIDO
+          const question = data.question;
+          this.logger.log(`Recibida pregunta para asesor: "${question}"`);
+          responseData = {
+            version,
+            screen: 'CONFIRM',
+            data: {
+              details: `✅ *Consulta Enviada*
+----------------------------------
+*Tu pregunta:* ${question}
+\n`,
             },
           };
           this.saveMessage(businessId, userNumber, responseData);
