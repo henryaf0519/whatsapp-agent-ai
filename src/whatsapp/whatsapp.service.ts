@@ -14,6 +14,7 @@ import { S3ConversationLogService } from 'src/conversation-log/s3-conversation-l
 import { Readable } from 'stream';
 import { DynamoService } from 'src/database/dynamo/dynamo.service';
 import FormData from 'form-data';
+import { CreateTemplateDto } from 'src/whatsapp-templates/dto/create-template.dto';
 
 interface WhatsAppMessageBody {
   messaging_product: string;
@@ -818,6 +819,45 @@ export class WhatsappService {
         error instanceof Error ? error.stack : undefined,
       );
       this.handleAxiosError(error as AxiosError, 1); // Reutiliza tu manejador de errores si lo tienes
+    }
+  }
+
+  async createMessageTemplate(
+    wabaId: string,
+    templateData: CreateTemplateDto,
+  ): Promise<any> {
+    const whatsappToken = await this.getWhatsappToken(wabaId);
+    const apiUrl = `https://graph.facebook.com/v22.0/${wabaId}/message_templates`;
+
+    this.logger.log(
+      `Enviando solicitud para crear plantilla: ${templateData.name}`,
+    );
+    this.logger.debug(
+      `Payload de la plantilla: ${JSON.stringify(templateData, null, 2)}`,
+    );
+
+    try {
+      const response = await axios.post(apiUrl, templateData, {
+        headers: {
+          Authorization: `Bearer ${whatsappToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      this.logger.log(`Plantilla "${templateData.name}" creada exitosamente.`);
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        this.logger.error(
+          `Error al crear la plantilla: ${JSON.stringify(error.response?.data)}`,
+        );
+        // Usar handleAxiosError para un manejo de errores consistente
+        this.handleAxiosError(error, 1);
+      }
+      this.logger.error('Error inesperado al crear la plantilla', error);
+      throw new HttpException(
+        'Error inesperado al crear plantilla',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
     }
   }
 

@@ -31,6 +31,7 @@ import { WhatsappTemplatesModule } from './whatsapp-templates/whatsapp-templates
     ConversationLogModule,
     AuthModule,
     WhatsappModule,
+    WhatsappTemplatesModule,
     TranscriptionModule,
     BulkMessagingModule,
     FlowModule,
