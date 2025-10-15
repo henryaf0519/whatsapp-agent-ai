@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import {
@@ -15,6 +17,7 @@ import { Readable } from 'stream';
 import { DynamoService } from 'src/database/dynamo/dynamo.service';
 import FormData from 'form-data';
 import { CreateTemplateDto } from 'src/whatsapp-templates/dto/create-template.dto';
+import { Stream } from 'stream';
 
 interface WhatsAppMessageBody {
   messaging_product: string;
@@ -823,17 +826,18 @@ export class WhatsappService {
   }
 
   async createMessageTemplate(
+    business_id: string,
     wabaId: string,
     templateData: CreateTemplateDto,
   ): Promise<any> {
-    const whatsappToken = await this.getWhatsappToken(wabaId);
+    const whatsappToken = await this.getWhatsappToken(business_id);
     const apiUrl = `https://graph.facebook.com/v22.0/${wabaId}/message_templates`;
 
     this.logger.log(
       `Enviando solicitud para crear plantilla: ${templateData.name}`,
     );
     this.logger.debug(
-      `Payload de la plantilla: ${JSON.stringify(templateData, null, 2)}`,
+      `Payload final de la plantilla: ${JSON.stringify(templateData, null, 2)}`,
     );
 
     try {
@@ -846,17 +850,96 @@ export class WhatsappService {
       this.logger.log(`Plantilla "${templateData.name}" creada exitosamente.`);
       return response.data;
     } catch (error) {
-      if (axios.isAxiosError(error)) {
-        this.logger.error(
-          `Error al crear la plantilla: ${JSON.stringify(error.response?.data)}`,
-        );
-        // Usar handleAxiosError para un manejo de errores consistente
-        this.handleAxiosError(error, 1);
-      }
-      this.logger.error('Error inesperado al crear la plantilla', error);
+      this.logger.error('Error al intentar crear la plantilla en Meta.');
+      this.throwMetaError(error, 'Error al crear la plantilla en Meta');
+    }
+  }
+
+  async uploadMediaBufferToMeta(
+    business_id: string,
+    appId: string,
+    fileBuffer: Buffer,
+    fileType: string,
+  ): Promise<{ handle: string }> {
+    const whatsappToken = await this.getWhatsappToken(business_id);
+    const apiVersion = 'v20.0';
+
+    // --- PASO 1: Crear la Sesión de Subida ---
+    const createSessionUrl = `https://graph.facebook.com/${apiVersion}/${appId}/uploads`;
+    let uploadSessionId: string | undefined;
+
+    try {
+      this.logger.log(
+        `Paso 1: Creando sesión de subida para un archivo de tipo ${fileType}`,
+      );
+      const sessionResponse = await axios.post(createSessionUrl, null, {
+        params: {
+          file_length: fileBuffer.length,
+          file_type: fileType,
+          access_token: whatsappToken,
+          messaging_product: 'whatsapp',
+        },
+      });
+      uploadSessionId = sessionResponse.data.id;
+      this.logger.log(
+        `Paso 1 Exitoso. Session ID obtenido: ${uploadSessionId}`,
+      );
+    } catch (error) {
+      this.logger.error(`Error en el Paso 1 (Crear Sesión)`);
+      this.throwMetaError(
+        error,
+        'No se pudo iniciar la sesión de subida con Meta',
+      );
       throw new HttpException(
-        'Error inesperado al crear plantilla',
+        'No se pudo iniciar la sesión de subida con Meta',
         HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+
+    if (!uploadSessionId) {
+      this.logger.error('No se pudo obtener el uploadSessionId en el Paso 1.');
+      throw new HttpException(
+        'No se pudo obtener el uploadSessionId en el Paso 1.',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+
+    // --- PASO 2: Subir el Archivo a la Sesión ---
+    const uploadUrl = `https://graph.facebook.com/${apiVersion}/${uploadSessionId}`;
+    try {
+      this.logger.log(
+        `Paso 2: Subiendo ${fileBuffer.length} bytes a la sesión ${uploadSessionId}`,
+      );
+      const uploadResponse = await axios.post(uploadUrl, fileBuffer, {
+        headers: {
+          Authorization: `OAuth ${whatsappToken}`,
+          'Content-Type': fileType,
+          file_offset: 0,
+        },
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+      });
+
+      const fileHandle = uploadResponse.data.h;
+      if (!fileHandle) {
+        this.logger.error(
+          `Respuesta inesperada en el Paso 2: ${JSON.stringify(uploadResponse.data)}`,
+        );
+        throw new HttpException(
+          'La respuesta de Meta no contenía un handle de archivo.',
+          HttpStatus.INTERNAL_SERVER_ERROR,
+        );
+      }
+
+      this.logger.log(
+        `Paso 2 Exitoso. Handle de archivo obtenido: ${fileHandle}`,
+      );
+      return { handle: fileHandle };
+    } catch (error) {
+      this.logger.error(`Error en el Paso 2 (Subir Archivo)`);
+      this.throwMetaError(
+        error,
+        'No se pudo subir el archivo a la sesión de Meta',
       );
     }
   }
@@ -873,5 +956,36 @@ export class WhatsappService {
     }
     const token = businessCredentials.whatsapp_token;
     return token ? token : '';
+  }
+
+  private throwMetaError(error: any, defaultMessage: string): never {
+    if (axios.isAxiosError(error)) {
+      const axiosError = error;
+      const errorMessage =
+        axiosError.response?.data?.error?.message || defaultMessage;
+      const errorStatus =
+        axiosError.response?.status || HttpStatus.INTERNAL_SERVER_ERROR;
+
+      this.logger.error(
+        `Error de la API de Meta [${errorStatus}]: ${errorMessage}`,
+      );
+      this.logger.debug(
+        `Respuesta completa del error: ${JSON.stringify(axiosError.response?.data)}`,
+      );
+
+      throw new HttpException(
+        {
+          message: `Error de la API de Meta: ${errorMessage}`,
+          metaError: axiosError.response?.data?.error,
+        },
+        errorStatus,
+      );
+    }
+
+    // Para cualquier otro tipo de error inesperado
+    this.logger.error(
+      `Error inesperado no relacionado con Axios: ${error.message}`,
+    );
+    throw new HttpException(defaultMessage, HttpStatus.INTERNAL_SERVER_ERROR);
   }
 }
