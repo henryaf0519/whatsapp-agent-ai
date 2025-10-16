@@ -18,6 +18,7 @@ import { DynamoService } from 'src/database/dynamo/dynamo.service';
 import FormData from 'form-data';
 import { CreateTemplateDto } from 'src/whatsapp-templates/dto/create-template.dto';
 import { Stream } from 'stream';
+import { UpdateTemplateDto } from 'src/whatsapp-templates/dto/update-template.dto';
 
 interface WhatsAppMessageBody {
   messaging_product: string;
@@ -715,6 +716,64 @@ export class WhatsappService {
       this.logger.error('Error inesperado al obtener plantillas', error);
       throw new HttpException(
         'Error inesperado',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  async updateTemplate(
+    businessId: string,
+    templateId: string,
+    updateTemplateDto: UpdateTemplateDto,
+  ): Promise<any> {
+    const whatsappToken = await this.getWhatsappToken(businessId);
+    const url = `https://graph.facebook.com/v22.0/${templateId}`;
+
+    // El payload solo necesita los componentes, como en el ejemplo.
+    const payload = {
+      components: updateTemplateDto.components,
+    };
+
+    this.logger.log(`Intentando actualizar la plantilla con ID: ${templateId}`);
+    this.logger.debug(`URL de la petición: ${url}`);
+    this.logger.debug(`Payload enviado: ${JSON.stringify(payload)}`);
+
+    try {
+      const response = await axios.post(url, payload, {
+        headers: {
+          Authorization: `Bearer ${whatsappToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      this.logger.log(
+        `Plantilla ${templateId} actualizada exitosamente.`,
+        response.data,
+      );
+      return response.data;
+    } catch (error) {
+      // Manejo de errores específico para Axios
+      if (axios.isAxiosError(error)) {
+        const errorData = error.response?.data;
+        this.logger.error(
+          `Error de la API de WhatsApp al actualizar la plantilla ${templateId}`,
+          errorData,
+        );
+        // Propagamos el error de Meta al frontend para un feedback más claro
+        throw new HttpException(
+          errorData?.error?.error_user_msg ||
+            'Error al comunicarse con la API de WhatsApp.',
+          error.response?.status || HttpStatus.INTERNAL_SERVER_ERROR,
+        );
+      }
+
+      // Manejo de errores genéricos
+      this.logger.error(
+        `Error inesperado al actualizar la plantilla ${templateId}`,
+        error,
+      );
+      throw new HttpException(
+        'Ocurrió un error inesperado en el servidor.',
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

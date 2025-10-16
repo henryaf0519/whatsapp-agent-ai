@@ -12,10 +12,13 @@ import {
   HttpCode,
   HttpStatus,
   HttpException,
+  Put,
+  Param,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { CreateTemplateDto } from './dto/create-template.dto';
 import { WhatsappTemplatesService } from './whatsapp-templates.service';
+import { UpdateTemplateDto } from './dto/update-template.dto';
 
 @Controller('templates')
 @UseGuards(AuthGuard('jwt'))
@@ -67,5 +70,18 @@ export class WhatsappTemplatesController {
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
+  }
+
+  @Put(':id')
+  @HttpCode(HttpStatus.OK)
+  update(
+    @Param('id') id: string,
+    @Body() updateTemplateDto: UpdateTemplateDto,
+    @Req() req: import('express').Request,
+  ) {
+    const { number_id } = req.user as {
+      number_id: string;
+    };
+    return this.templatesService.update(number_id, id, updateTemplateDto);
   }
 }

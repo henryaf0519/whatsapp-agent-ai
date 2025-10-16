@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-redundant-type-constituents */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
@@ -8,6 +9,7 @@ import {
   CreateTemplateDto,
   HeaderComponentDto,
 } from './dto/create-template.dto';
+import { UpdateTemplateDto } from './dto/update-template.dto';
 
 @Injectable()
 export class WhatsappTemplatesService {
@@ -94,6 +96,31 @@ export class WhatsappTemplatesService {
       );
       throw new HttpException(
         'No se pudieron obtener las plantillas.',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  async update(
+    number_id: string,
+    id: string,
+    updateTemplateDto: UpdateTemplateDto,
+  ): Promise<any[]> {
+    try {
+      const templates = await this.whatsappService.updateTemplate(
+        number_id,
+        id,
+        updateTemplateDto,
+      );
+      return templates;
+    } catch (error) {
+      this.logger.error(
+        `Error al actualizar la plantilla ${id} para el número ID ${number_id}: ${
+          (error as any).response?.data || (error as any).message
+        }`,
+      );
+      throw new HttpException(
+        'No se pudo actualizar la plantilla.',
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
