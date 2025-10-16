@@ -166,4 +166,20 @@ export class WhatsappTemplatesService {
     );
     return resp;
   }
+
+  async delete(
+    number_id: string,
+    waba_id: string,
+    templateName: string,
+  ): Promise<any> {
+    this.logger.log(
+      `Iniciando eliminación de plantilla "${templateName}" para WABA ID: ${waba_id}`,
+    );
+
+    return this.whatsappService.deleteTemplateByName(
+      number_id,
+      waba_id,
+      templateName,
+    );
+  }
 }

@@ -14,6 +14,7 @@ import {
   HttpException,
   Put,
   Param,
+  Delete,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { CreateTemplateDto } from './dto/create-template.dto';
@@ -93,5 +94,18 @@ export class WhatsappTemplatesController {
       '1375929964096026',
       updateTemplateDto,
     );
+  }
+
+  @Delete(':name')
+  @HttpCode(HttpStatus.OK)
+  remove(@Param('name') name: string, @Req() req: import('express').Request) {
+    const { number_id, waba_id } = req.user as {
+      number_id: string;
+      waba_id: string;
+    };
+    this.logger.log(
+      `Solicitud para eliminar plantilla "${name}" para WABA ID ${waba_id}`,
+    );
+    return this.templatesService.delete(number_id, waba_id, name);
   }
 }

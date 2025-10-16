@@ -721,8 +721,6 @@ export class WhatsappService {
     }
   }
 
-  
-
   async downloadMedia(
     mediaId: string,
     businessId: string,
@@ -912,6 +910,42 @@ export class WhatsappService {
       throw new HttpException(
         'Ocurrió un error inesperado en el servidor.',
         HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  async deleteTemplateByName(
+    businessId: string,
+    waba_id: string,
+    templateName: string,
+  ): Promise<{ success: boolean }> {
+    const apiUrl = `https://graph.facebook.com/v22.0/${waba_id}/message_templates`;
+    const whatsappToken = await this.getWhatsappToken(businessId);
+    this.logger.log(
+      `Intentando eliminar la plantilla: ${templateName} de WABA ID: ${businessId}`,
+    );
+
+    try {
+      const response = await axios.delete(apiUrl, {
+        headers: {
+          Authorization: `Bearer ${whatsappToken}`,
+        },
+        params: {
+          name: templateName,
+        },
+      });
+
+      this.logger.log(
+        `Plantilla "${templateName}" eliminada exitosamente. Respuesta: ${JSON.stringify(response.data)}`,
+      );
+      return response.data;
+    } catch (error) {
+      this.logger.error(
+        `Error al intentar eliminar la plantilla "${templateName}" en Meta.`,
+      );
+      this.throwMetaError(
+        error,
+        `Error al eliminar la plantilla "${templateName}" en Meta`,
       );
     }
   }
