@@ -944,7 +944,7 @@ export class WhatsappService {
     }
   }
 
-  private async getWhatsappToken(businessId: string): Promise<string> {
+  public async getWhatsappToken(businessId: string): Promise<string> {
     const businessCredentials =
       await this.db.findBusinessByNumberId(businessId);
 

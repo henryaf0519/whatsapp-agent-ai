@@ -70,4 +70,32 @@ export class WhatsappTemplatesService {
       mutableTemplateDto,
     );
   }
+
+  async getTemplates(number_id: string, waba_id: string): Promise<any[]> {
+    const token = await this.whatsappService.getWhatsappToken(number_id);
+    if (!token) {
+      throw new HttpException(
+        'No se pudo obtener el token de WhatsApp.',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+
+    try {
+      const templates = await this.whatsappService.getMessageTemplates(
+        waba_id,
+        token,
+      );
+      return templates;
+    } catch (error) {
+      this.logger.error(
+        `Error al obtener plantillas para WABA ID ${waba_id}: ${
+          (error as any).response?.data || (error as any).message
+        }`,
+      );
+      throw new HttpException(
+        'No se pudieron obtener las plantillas.',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
 }
