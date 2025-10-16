@@ -102,27 +102,68 @@ export class WhatsappTemplatesService {
   }
 
   async update(
+    templateId: string,
     number_id: string,
-    id: string,
+    waba_id: string,
+    appId: string,
     updateTemplateDto: UpdateTemplateDto,
-  ): Promise<any[]> {
-    try {
-      const templates = await this.whatsappService.updateTemplate(
-        number_id,
-        id,
-        updateTemplateDto,
-      );
-      return templates;
-    } catch (error) {
-      this.logger.error(
-        `Error al actualizar la plantilla ${id} para el número ID ${number_id}: ${
-          (error as any).response?.data || (error as any).message
-        }`,
-      );
-      throw new HttpException(
-        'No se pudo actualizar la plantilla.',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+  ): Promise<any> {
+    this.logger.log(
+      `Iniciando orquestación para ACTUALIZAR plantilla ID: ${templateId}`,
+    );
+
+    // Hacemos una copia mutable para poder modificarla
+    const mutableUpdateDto = JSON.parse(JSON.stringify(updateTemplateDto));
+
+    const mediaHeaderComponent = mutableUpdateDto.components.find(
+      (c) =>
+        c.type === 'HEADER' &&
+        ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(c.format),
+    ) as HeaderComponentDto | undefined;
+
+    // Si hay una nueva imagen en base64...
+    if (mediaHeaderComponent?.example?.header_base64) {
+      this.logger.log('Se detectó un archivo base64. Subiendo a Meta...');
+      const base64Data = mediaHeaderComponent.example.header_base64;
+
+      const matches = base64Data.match(/^data:(.+);base64,(.+)$/);
+      if (!matches || matches.length !== 3) {
+        throw new HttpException(
+          'Formato de base64 inválido.',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      const fileType = matches[1];
+      const fileBuffer = Buffer.from(matches[2], 'base64');
+
+      try {
+        // --- USANDO EL MISMO PATRÓN QUE 'CREATE' ---
+        const { handle } = await this.whatsappService.uploadMediaBufferToMeta(
+          number_id,
+          appId,
+          fileBuffer,
+          fileType,
+        );
+        this.logger.log(`Handle obtenido: ${handle}. Actualizando DTO...`);
+
+        // Reemplazamos el base64 por el handle válido
+        mediaHeaderComponent.example.header_handle = [handle];
+        delete mediaHeaderComponent.example.header_base64;
+      } catch (uploadError) {
+        this.logger.error(
+          'Fallo al subir la imagen durante la actualización.',
+          uploadError,
+        );
+        throw uploadError;
+      }
     }
+
+    const payload = { components: mutableUpdateDto.components };
+    const resp = await this.whatsappService.updateTemplate(
+      number_id,
+      templateId,
+      payload,
+    );
+    return resp;
   }
 }

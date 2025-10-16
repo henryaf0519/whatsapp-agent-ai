@@ -79,9 +79,19 @@ export class WhatsappTemplatesController {
     @Body() updateTemplateDto: UpdateTemplateDto,
     @Req() req: import('express').Request,
   ) {
-    const { number_id } = req.user as {
+    const { number_id, waba_id } = req.user as {
       number_id: string;
+      waba_id: string;
     };
-    return this.templatesService.update(number_id, id, updateTemplateDto);
+    this.logger.log(
+      `Actualizando plantilla ID ${id} para número ID ${number_id} y WABA ID ${waba_id}`,
+    );
+    return this.templatesService.update(
+      id,
+      number_id,
+      waba_id,
+      '1375929964096026',
+      updateTemplateDto,
+    );
   }
 }
