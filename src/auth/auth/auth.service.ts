@@ -44,6 +44,7 @@ export class AuthService {
       username: user.email,
       waba_id: user.waba_id,
       number_id: user.number_id,
+      app_id: user.app_id,
     };
     const accessToken = this.jwtService.sign(payload);
 
@@ -80,6 +81,7 @@ export class AuthService {
       email: user.email,
       waba_id: user.waba_id,
       number_id: user.number_id,
+      app_id: user.app_id,
     };
 
     return {
@@ -95,6 +97,7 @@ export class AuthService {
     waba_id: string,
     whatsapp_token: string,
     number_id: string,
+    app_id: string,
   ): Promise<any> {
     const hashedPassword = await bcrypt.hash(password, 10);
     const user = await this.dynamoService.createUserLogin(
@@ -103,6 +106,7 @@ export class AuthService {
       waba_id,
       whatsapp_token,
       number_id,
+      app_id,
     );
     return user;
   }

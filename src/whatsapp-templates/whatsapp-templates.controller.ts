@@ -33,14 +33,15 @@ export class WhatsappTemplatesController {
     @Body() createTemplateDto: CreateTemplateDto,
     @Req() req: import('express').Request,
   ) {
-    const { number_id, waba_id } = req.user as {
+    const { number_id, waba_id, app_id } = req.user as {
       number_id: string;
       waba_id: string;
+      app_id: string;
     };
     return this.templatesService.create(
       number_id,
       waba_id,
-      '1375929964096026',
+      app_id,
       createTemplateDto,
     );
   }
@@ -80,9 +81,10 @@ export class WhatsappTemplatesController {
     @Body() updateTemplateDto: UpdateTemplateDto,
     @Req() req: import('express').Request,
   ) {
-    const { number_id, waba_id } = req.user as {
+    const { number_id, waba_id, app_id } = req.user as {
       number_id: string;
       waba_id: string;
+      app_id: string;
     };
     this.logger.log(
       `Actualizando plantilla ID ${id} para número ID ${number_id} y WABA ID ${waba_id}`,
@@ -91,7 +93,7 @@ export class WhatsappTemplatesController {
       id,
       number_id,
       waba_id,
-      '1375929964096026',
+      app_id,
       updateTemplateDto,
     );
   }

@@ -800,6 +800,7 @@ export class DynamoService {
     waba_id: string,
     whatsapp_token: string,
     number_id: string,
+    app_id: string,
   ): Promise<any> {
     const command = new PutCommand({
       TableName: 'login',
@@ -809,6 +810,7 @@ export class DynamoService {
         number_id: number_id,
         waba_id: waba_id,
         whatsapp_token: whatsapp_token,
+        app_id: app_id,
       },
     });
 
