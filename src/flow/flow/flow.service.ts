@@ -1,10 +1,14 @@
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-import { Injectable, Logger } from '@nestjs/common';
+import { forwardRef, HttpException, HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 import { DynamoService } from 'src/database/dynamo/dynamo.service';
 import { SocketGateway } from 'src/socket/socket.gateway';
+import axios, { AxiosError } from 'axios';
+import { WhatsappService } from 'src/whatsapp/whatsapp.service';
+import FormData from 'form-data';
 
 const WELCOME_OPTIONS = [
   { id: 'ABOUT_US', title: 'Quienes Somos' },
@@ -218,6 +222,7 @@ const ALL_OPTIONS = [
 
 @Injectable()
 export class FlowService {
+  private readonly baseUrl = 'https://graph.facebook.com/v22.0';
   private readonly logger = new Logger(FlowService.name);
   private readonly privateKey: string;
   private flowSessions: Record<string, any> = {};
@@ -226,6 +231,8 @@ export class FlowService {
     private readonly configService: ConfigService,
     private readonly dynamoService: DynamoService,
     private readonly socketGateway: SocketGateway,
+    @Inject(forwardRef(() => WhatsappService))
+    private readonly whatsappService: WhatsappService,
   ) {
     const privateKey = this.configService.get<string>(
       'WHATSAPP_FLOW_PRIVATE_KEY',
@@ -579,5 +586,174 @@ Pago de pensión por $290,000 COP\n`,
       userNumber,
       sendSocketUser,
     );
+  }
+
+  async createFlow(
+    wabaId: string,
+    numberId: string,
+    name: string,
+    categories: string[] = ['OTHER'],
+  ) {
+    this.logger.log(`Creando Flow "${name}" para WABA ID: ${wabaId}`);
+    const token = await this.whatsappService.getWhatsappToken(numberId);
+    const url = `${this.baseUrl}/${wabaId}/flows`;
+
+    const form = new FormData();
+    form.append('name', name);
+    form.append('categories', JSON.stringify(categories));
+
+    try {
+      const response = await axios.post(url, form, {
+        headers: {
+          ...form.getHeaders(),
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      return response.data;
+    } catch (error) {
+      this.logger.error(`Error al crear el flow "${name}"`, error);
+      this.throwMetaError(error, 'Error al crear el flow');
+    }
+  }
+
+  /**
+   * 2. Obtener un Flow específico por su ID
+   * Corresponde a: GET /{flow_id}
+   */
+  async getFlowById(flowId: string, numberId: string) {
+    this.logger.log(`Obteniendo Flow con ID: ${flowId}`);
+    const token = await this.whatsappService.getWhatsappToken(numberId);
+    const url = `${this.baseUrl}/${flowId}`;
+    const fields =
+      'id,name,categories,preview,status,validation_errors,json_version,data_api_version,data_channel_uri,health_status,whatsapp_business_account,application';
+
+    try {
+      const response = await axios.get(url, {
+        headers: { Authorization: `Bearer ${token}` },
+        params: { fields },
+      });
+      return response.data;
+    } catch (error) {
+      this.logger.error(`Error al obtener el flow ID: ${flowId}`, error);
+      this.throwMetaError(error, 'Error al obtener el flow');
+    }
+  }
+
+  /**
+   * 3. Obtener todos los Flows de una WABA
+   * Corresponde a: GET /{waba_id}/flows
+   */
+  async getFlows(wabaId: string, numberId: string) {
+    this.logger.log(`Obteniendo todos los flows para WABA ID: ${wabaId}`);
+    const token = await this.whatsappService.getWhatsappToken(numberId);
+    const url = `${this.baseUrl}/${wabaId}/flows`;
+
+    try {
+      const response = await axios.get(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return response.data;
+    } catch (error) {
+      this.logger.error(
+        `Error al obtener flows para WABA ID: ${wabaId}`,
+        error,
+      );
+      this.throwMetaError(error, 'Error al obtener la lista de flows');
+    }
+  }
+
+  /**
+   * 4. Actualizar el contenido de un Flow (subiendo el flow.json)
+   * Corresponde a: POST /{flow_id}/assets
+   */
+  async updateFlowAssets(
+    flowId: string,
+    numberId: string,
+    flowJson: string, // El frontend debe enviar el CONTENIDO del flow.json como un string
+  ) {
+    this.logger.log(
+      `Actualizando assets (flow.json) para el Flow ID: ${flowId}`,
+    );
+    const token = await this.whatsappService.getWhatsappToken(numberId);
+    const url = `${this.baseUrl}/${flowId}/assets`;
+
+    const form = new FormData();
+    form.append('name', 'flow.json'); // El nombre del asset, siempre 'flow.json'
+    form.append('asset_type', 'FLOW_JSON');
+    form.append('file', Buffer.from(flowJson, 'utf-8'), {
+      filename: 'flow.json',
+      contentType: 'application/json; charset=utf-8',
+    });
+
+    try {
+      const response = await axios.post(url, form, {
+        headers: {
+          ...form.getHeaders(),
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      return response.data;
+    } catch (error) {
+      this.logger.error(
+        `Error al actualizar assets para flow: ${flowId}`,
+        error,
+      );
+      this.throwMetaError(error, 'Error al actualizar el flow');
+    }
+  }
+
+  /**
+   * 5. Eliminar un Flow
+   * Corresponde a: DELETE /{flow_id}
+   */
+  async deleteFlow(flowId: string, numberId: string) {
+    this.logger.log(`Eliminando Flow con ID: ${flowId}`);
+    const token = await this.whatsappService.getWhatsappToken(numberId);
+    const url = `${this.baseUrl}/${flowId}`;
+
+    try {
+      const response = await axios.delete(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return response.data;
+    } catch (error) {
+      this.logger.error(`Error al eliminar flow: ${flowId}`, error);
+      this.throwMetaError(error, 'Error al eliminar el flow');
+    }
+  }
+
+  /**
+   * Helper para manejar errores de la API de Meta
+   * (Copiado de whatsapp.service.ts para consistencia)
+   */
+  private throwMetaError(error: any, defaultMessage: string): never {
+    if (axios.isAxiosError(error)) {
+      const axiosError = error;
+      const errorMessage =
+        axiosError.response?.data?.error?.message || defaultMessage;
+      const errorStatus =
+        axiosError.response?.status || HttpStatus.INTERNAL_SERVER_ERROR;
+
+      this.logger.error(
+        `Error de la API de Meta [${errorStatus}]: ${errorMessage}`,
+      );
+      this.logger.debug(
+        `Respuesta completa del error: ${JSON.stringify(axiosError.response?.data)}`,
+      );
+
+      throw new HttpException(
+        {
+          message: `Error de la API de Meta: ${errorMessage}`,
+          metaError: axiosError.response?.data?.error,
+        },
+        errorStatus,
+      );
+    }
+
+    // Para cualquier otro tipo de error inesperado
+    this.logger.error(
+      `Error inesperado no relacionado con Axios: ${error.message}`,
+    );
+    throw new HttpException(defaultMessage, HttpStatus.INTERNAL_SERVER_ERROR);
   }
 }
