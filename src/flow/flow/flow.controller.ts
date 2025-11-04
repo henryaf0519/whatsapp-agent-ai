@@ -32,10 +32,6 @@ export class FlowController {
   private readonly logger = new Logger(FlowController.name);
   constructor(private readonly flowService: FlowService) {}
 
-  /**
-   * Webhook público para recibir datos del flow desde WhatsApp.
-   * (Este no debe ser protegido por JWT)
-   */
   @Post('webhook')
   async handleFlowWebhook(@Body() body: any, @Res() res: Response) {
     this.logger.log(
@@ -43,11 +39,8 @@ export class FlowController {
     );
 
     try {
-      // Directamente procesamos los datos y obtenemos la respuesta cifrada
       const encryptedResponsePayload =
-        await this.flowService.processFlowData(body);
-
-      // Enviamos la respuesta cifrada como texto plano
+        await this.flowService.processDynamicFlowData(body);
       res
         .status(200)
         .header('Content-Type', 'text/plain')

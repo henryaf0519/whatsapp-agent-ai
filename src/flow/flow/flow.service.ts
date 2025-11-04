@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/await-thenable */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
@@ -508,6 +509,8 @@ Pago de pensión por $290,000 COP\n`,
     );
   }
 
+
+
   private decryptRequest(
     body: any,
     privatePem: string | undefined,
@@ -711,19 +714,16 @@ Pago de pensión por $290,000 COP\n`,
    * 4. Actualizar el contenido de un Flow (subiendo el flow.json)
    * Corresponde a: POST /{flow_id}/assets
    */
-  async updateFlowAssets(
-    flowId: string,
-    numberId: string,
-    flowJson: string, // El frontend debe enviar el CONTENIDO del flow.json como un string
-  ) {
+  async updateFlowAssets(flowId: string, numberId: string, flowJson: string) {
     this.logger.log(
-      `Actualizando assets (flow.json) para el Flow ID: ${flowId}`,
+      `Actualizando assets (flow.json) para el Flow ID: ${flowId}, Cliente: ${numberId}`,
     );
+
     const token = await this.whatsappService.getWhatsappToken(numberId);
     const url = `${this.baseUrl}/${flowId}/assets`;
 
     const form = new FormData();
-    form.append('name', 'flow.json'); // El nombre del asset, siempre 'flow.json'
+    form.append('name', 'flow.json');
     form.append('asset_type', 'FLOW_JSON');
     form.append('file', Buffer.from(flowJson, 'utf-8'), {
       filename: 'flow.json',
@@ -731,18 +731,50 @@ Pago de pensión por $290,000 COP\n`,
     });
 
     try {
+      this.logger.log(`Enviando actualización a Meta API para ${flowId}...`);
       const response = await axios.post(url, form, {
         headers: {
           ...form.getHeaders(),
           Authorization: `Bearer ${token}`,
         },
       });
-      return response.data;
-    } catch (error) {
-      this.logger.error(
-        `Error al actualizar assets para flow: ${flowId}`,
-        error,
+
+      this.logger.log(
+        `ÉxITO en Meta API. Respuesta: ${JSON.stringify(response.data)}`,
       );
+      try {
+        this.logger.log(
+          `Guardando definición de flujo en DynamoDB para ${numberId}/${flowId}...`,
+        );
+
+        await this.dynamoService.saveClientFlowDefinition(
+          numberId,
+          flowId,
+          flowJson,
+          `Definición de flujo para ${flowId}`,
+        );
+
+        this.logger.log(`¡Flujo ${flowId} guardado en DynamoDB exitosamente!`);
+      } catch (dynamoError) {
+        this.logger.error(
+          `¡INCONSISTENCIA! El flujo ${flowId} se actualizó en Meta, pero falló al guardar en DynamoDB.`,
+          dynamoError,
+        );
+        // Retornamos el éxito de Meta, pero con una advertencia.
+        return {
+          ...response.data,
+          dynamo_db_status: 'failed',
+          warning: 'Flow updated in Meta but failed to save in DynamoDB.',
+        };
+      }
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(
+        `Error al actualizar assets para flow en Meta: ${flowId}`,
+        error?.response?.data || error?.message, // Mostrar el error de Meta si está disponible
+      );
+
+      // Re-utilizamos tu función de manejo de errores
       this.throwMetaError(error, 'Error al actualizar el flow');
     }
   }

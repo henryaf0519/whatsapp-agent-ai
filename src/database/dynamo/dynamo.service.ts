@@ -1085,4 +1085,70 @@ export class DynamoService {
     );
     return response.Items || [];
   }
+
+  async saveClientFlowDefinition(
+    numberId: string,
+    flowId: string,
+    flowJson: string,
+    description: string = 'Definición de flujo',
+  ): Promise<any> {
+    const item = {
+      number_id: numberId,
+      flow_id: flowId,
+      flow_definition: flowJson,
+      description: description,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const command = new PutCommand({
+      TableName: 'ClientFlows',
+      Item: item,
+    });
+
+    try {
+      this.logger.log(`Guardando definición de flujo: ${numberId}/${flowId}`);
+      await this.docClient.send(command);
+      return { success: true, item };
+    } catch (error) {
+      this.logger.error(
+        `Error al guardar la definición del flujo ${numberId}/${flowId}`,
+        error,
+      );
+      throw new Error('Error al guardar la definición del flujo en DynamoDB');
+    }
+  }
+
+  async getClientFlowDefinition(
+    numberId: string,
+    flowId: string,
+  ): Promise<any> {
+    const command = new GetCommand({
+      TableName: 'ClientFlows',
+      Key: {
+        number_id: numberId,
+        flow_id: flowId,
+      },
+    });
+
+    try {
+      this.logger.debug(`Buscando definición de flujo: ${numberId}/${flowId}`);
+      const result = await this.docClient.send(command);
+
+      if (!result.Item) {
+        this.logger.error(
+          `No se encontró definición de flujo para ${numberId}/${flowId}`,
+        );
+        throw new Error('Definición de flujo no encontrada');
+      }
+
+      this.logger.debug(`Definición de flujo encontrada.`);
+      return result.Item; // Devuelve el ítem completo (incluye 'flow_definition')
+    } catch (error) {
+      this.logger.error(
+        `Error al obtener la definición del flujo ${numberId}/${flowId}`,
+        error,
+      );
+      throw new Error('Error al obtener la definición del flujo de DynamoDB');
+    }
+  }
 }
