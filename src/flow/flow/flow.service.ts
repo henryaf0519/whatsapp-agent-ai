@@ -9,6 +9,7 @@ import {
   Inject,
   Injectable,
   Logger,
+  NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
@@ -509,7 +510,242 @@ Pago de pensión por $290,000 COP\n`,
     );
   }
 
+  async processDynamicFlowData(body: any): Promise<string> {
+    const { aesKeyBuffer, initialVectorBuffer, decryptedBody } =
+      this.decryptRequest(body, this.privateKey);
 
+    this.logger.log(
+      `[DYN] Datos descifrados: ${JSON.stringify(decryptedBody)}`,
+    );
+
+    const { version, action, screen, data, flow_token } = decryptedBody;
+
+    // 1. Manejar 'ping' (comprobación de estado)
+    if (action === 'ping') {
+      this.logger.log('Respondiendo al "ping" de la comprobación de estado.');
+      const responseData = { data: { status: 'active' } };
+      return this.encryptResponse(
+        responseData,
+        aesKeyBuffer,
+        initialVectorBuffer,
+      );
+    }
+
+    // 2. Extraer identificadores y cargar el JSON del flujo
+    const { numberId, userNumber, flow_id } = this._parseFlowToken(flow_token);
+    if (!flow_id || !numberId || !userNumber) {
+      this.logger.error(
+        `[DYN] flow_token o flow_id faltantes. Token: ${flow_token}, ID: ${flow_id}`,
+      );
+      throw new Error('No se pudo parsear flow_token o falta flow_id');
+    }
+
+    const flowJson = await this._getFlowJson(numberId, flow_id);
+    let responseData: any;
+
+    // 3. Obtener y fusionar datos de sesión
+    const currentSessionData = this.flowSessions[flow_token] || {};
+    const newSessionData = { ...currentSessionData, ...data };
+    this.flowSessions[flow_token] = newSessionData; // Guardar estado actualizado
+
+    // 4. Enrutar la acción (INIT, data_exchange, o complete)
+    switch (action) {
+      case 'INIT': {
+        this.logger.log(`[DYN] Acción INIT para ${flow_id}`);
+        // Limpiamos sesión anterior
+        this.flowSessions[flow_token] = {};
+
+        // La pantalla de inicio es la primera clave en routing_model
+        const startScreenId = Object.keys(flowJson.routing_model)[0];
+        if (!startScreenId) {
+          throw new NotFoundException(
+            'No se encontró una pantalla de inicio en routing_model',
+          );
+        }
+
+        responseData = {
+          version,
+          screen: startScreenId,
+          data: {}, // La pantalla de inicio (ej. BIENVENIDA) no necesita datos iniciales
+        };
+        break;
+      }
+
+      case 'data_exchange': {
+        this.logger.log(`[DYN] Acción data_exchange desde pantalla: ${screen}`);
+        this.logger.log(
+          `[DYN] Routing model actual: ${JSON.stringify(flowJson.routing_model)}`,
+        );
+
+        // Encontrar la siguiente pantalla usando el routing_model
+        const nextScreenId = flowJson.routing_model[screen]?.[0];
+        this.logger.log(`[DYN] Siguiente pantalla: ${nextScreenId}`);
+
+        if (!nextScreenId) {
+          throw new NotFoundException(
+            `No se encontró ruta de navegación para la pantalla "${screen}" en routing_model`,
+          );
+        }
+
+        let nextScreenData = {};
+
+        // Verificamos si la *siguiente* pantalla (ej. CONFIRMACION) espera datos
+        const nextScreenDef = flowJson.screens.find(
+          (s) => s.id === nextScreenId,
+        );
+
+        // --- INICIO DE LA CORRECCIÓN DEL ERROR ---
+        if (nextScreenDef && nextScreenDef.data) {
+          // CORRECCIÓN: Chequeamos si la *definición* de la pantalla
+          // espera una propiedad 'details', no el *valor* de esa propiedad.
+          if (
+            Object.prototype.hasOwnProperty.call(nextScreenDef.data, 'details')
+          ) {
+            this.logger.log(
+              `[DYN] Generando datos 'details' para la pantalla ${nextScreenId}`,
+            );
+            // Si es así, generamos dinámicamente el resumen
+            const details = this._buildDynamicDetails(newSessionData);
+            this.logger.log(
+              `[DYN] Resumen generado: ${JSON.stringify(details)}`,
+            );
+            // Y lo asignamos al objeto de datos que se enviará
+            nextScreenData = { details: details };
+
+            // Guardamos el resumen para el dashboard
+           // await this.saveMessage(numberId, userNumber, details);
+          }
+          // Aquí se podrían añadir más `if` para otras variables que las pantallas esperen
+        }
+        // --- FIN DE LA CORRECCIÓN DEL ERROR ---
+
+        responseData = {
+          version,
+          screen: nextScreenId,
+          data: nextScreenData,
+        };
+        break;
+      }
+
+      case 'complete': {
+        this.logger.log(`[DYN] Acción 'complete' recibida desde: ${screen}`);
+
+        // Esta es la acción final (ej. desde la pantalla CONFIRMACION)
+        const finalData = this.flowSessions[flow_token];
+        this.logger.log(
+          `[DYN] Flujo ${flow_id} completado. Datos finales: ${JSON.stringify(finalData)}`,
+        );
+
+        // Construir un resumen final 100% dinámico
+        const summary = this._buildDynamicDetails(
+          finalData,
+          'Cliente finalizó el flujo',
+        );
+
+        // Guardar el resumen final en DynamoDB y notificar al dashboard
+        await this.saveMessage(numberId, userNumber, summary);
+
+        // Limpiar la sesión
+        delete this.flowSessions[flow_token];
+
+        // Enviar respuesta de éxito
+        responseData = { version, data: { success: true } };
+        break;
+      }
+
+      default:
+        this.logger.warn(`Acción no reconocida recibida: ${action}`);
+        throw new Error(`Acción no soportada: ${action}`);
+    }
+
+    // 5. Encriptar y devolver la respuesta
+    return this.encryptResponse(
+      responseData,
+      aesKeyBuffer,
+      initialVectorBuffer,
+    );
+  }
+
+  // --- NUEVOS HELPERS PRIVADOS ---
+
+  /**
+   * Extrae el numberId (businessId) y userNumber (teléfono) del flow_token.
+   */
+  private _parseFlowToken(flow_token: string): {
+    numberId: string;
+    flow_id: string;
+    userNumber: string;
+  } {
+    try {
+      this.logger.log(`[DYN] Parseando flow_token: ${flow_token}`);
+      // Asumiendo formato: token_${to}_${businessId}_${Date.now()}
+      const parts = flow_token.split('_');
+      this.logger.log(`[DYN] Partes del token: ${JSON.stringify(parts)}`);
+      const userNumber = parts[1];
+      const numberId = parts[2]; // businessId
+      const flow_id = parts[3];
+      this.logger.log(`[DYN] numberId: ${numberId}, userNumber: ${userNumber}`);
+      if (!userNumber || !numberId || !flow_id) {
+        throw new Error('Formato de flow_token inválido');
+      }
+      return { numberId, userNumber, flow_id };
+    } catch (error) {
+      this.logger.error(`Error parseando flow_token: ${flow_token}`, error);
+      throw new Error('flow_token inválido');
+    }
+  }
+
+  /**
+   * Obtiene y parsea el JSON de la definición del flujo desde DynamoDB.
+   */
+  private async _getFlowJson(numberId: string, flowId: string): Promise<any> {
+    const definitionItem = await this.dynamoService.getClientFlowDefinition(
+      numberId,
+      flowId,
+    );
+
+    if (!definitionItem || !definitionItem.flow_definition) {
+      this.logger.error(
+        `[DYN] No se encontró flow_definition para numberId: ${numberId}, flowId: ${flowId}`,
+      );
+      throw new NotFoundException('Definición de flujo no encontrada.');
+    }
+
+    try {
+      // El JSON está guardad o como un string, necesitamos parsearlo
+      return JSON.parse(definitionItem.flow_definition);
+    } catch (error) {
+      this.logger.error(
+        `[DYN] Error parseando JSON para flowId: ${flowId}`,
+        error,
+      );
+      throw new Error('Error al parsear la definición del flujo.');
+    }
+  }
+
+  /**
+   * Construye un string de detalles 100% dinámico basado en los datos de la sesión.
+   * No asume nombres de campos como 'nombre' o 'email'.
+   */
+  private _buildDynamicDetails(sessionData: any, title?: string): string {
+    const details: string[] = [];
+
+    if (title) {
+      details.push(title);
+      details.push('-----------------');
+    }
+
+    for (const key in sessionData) {
+      if (Object.prototype.hasOwnProperty.call(sessionData, key)) {
+        const value = sessionData[key];
+        // Capitalizar la primera letra de la clave para que se vea bien
+        const formattedKey = key.charAt(0).toUpperCase() + key.slice(1);
+        details.push(`${formattedKey}: ${value || 'No especificado'}`);
+      }
+    }
+
+    return details.join('\n');
+  }
 
   private decryptRequest(
     body: any,
