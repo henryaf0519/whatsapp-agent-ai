@@ -133,4 +133,22 @@ export class FlowController {
     const user = req.user as JwtUser;
     return this.flowService.deleteFlow(flowId, user.number_id);
   }
+
+  /**
+   * 6. Publicar un Flow
+   */
+
+  @Post('publish') // <-- RUTA CAMBIADA (ya no tiene :flowId)
+  @UseGuards(AuthGuard('jwt'))
+  @HttpCode(HttpStatus.OK)
+  async publishFlow(
+    @Req() req: Request,
+    @Body('flowId') flowId: string, // <-- CAMBIADO (viene del body)
+    @Body('name') name: string,
+  ) {
+    const user = req.user as JwtUser;
+
+    // Pasamos todos los parámetros al servicio
+    return this.flowService.publishFlow(flowId, name, user.number_id);
+  }
 }

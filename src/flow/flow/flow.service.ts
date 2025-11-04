@@ -1,7 +1,14 @@
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-import { forwardRef, HttpException, HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
+import {
+  forwardRef,
+  HttpException,
+  HttpStatus,
+  Inject,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 import { DynamoService } from 'src/database/dynamo/dynamo.service';
@@ -224,7 +231,8 @@ const ALL_OPTIONS = [
 export class FlowService {
   private readonly baseUrl = 'https://graph.facebook.com/v22.0';
   private readonly logger = new Logger(FlowService.name);
-  private readonly privateKey: string;
+  private readonly privateKey: string | undefined;
+  private readonly urlWebhook: string | undefined;
   private flowSessions: Record<string, any> = {};
 
   constructor(
@@ -237,10 +245,13 @@ export class FlowService {
     const privateKey = this.configService.get<string>(
       'WHATSAPP_FLOW_PRIVATE_KEY',
     );
-    if (!privateKey) {
+    const url_webhook = this.configService.get<string>('URL_FLOW_WEBHOOK');
+
+    if (!privateKey && !url_webhook) {
       throw new Error('WHATSAPP_FLOW_PRIVATE_KEY no está configurada!');
     }
     this.privateKey = privateKey;
+    this.urlWebhook = url_webhook;
   }
 
   async processFlowData(body: any): Promise<string> {
@@ -499,8 +510,11 @@ Pago de pensión por $290,000 COP\n`,
 
   private decryptRequest(
     body: any,
-    privatePem: string,
+    privatePem: string | undefined,
   ): { aesKeyBuffer: Buffer; initialVectorBuffer: Buffer; decryptedBody: any } {
+    if (!privatePem) {
+      throw new Error('WHATSAPP_FLOW_PRIVATE_KEY no está configurada!');
+    }
     const { encrypted_aes_key, encrypted_flow_data, initial_vector } = body;
     const base64Key = privatePem
       .replace('-----BEGIN PRIVATE KEY-----', '')
@@ -621,22 +635,53 @@ Pago de pensión por $290,000 COP\n`,
    * Corresponde a: GET /{flow_id}
    */
   async getFlowById(flowId: string, numberId: string) {
-    this.logger.log(`Obteniendo Flow con ID: ${flowId}`);
+    this.logger.log(`Obteniendo Flow (metadata y JSON) con ID: ${flowId}`);
     const token = await this.whatsappService.getWhatsappToken(numberId);
-    const url = `${this.baseUrl}/${flowId}`;
-    const fields =
-      'id,name,categories,preview,status,validation_errors,json_version,data_api_version,data_channel_uri,health_status,whatsapp_business_account,application';
-
+    let flowJsonContent: any = null; // Default a null si no se encuentra
     try {
-      const response = await axios.get(url, {
-        headers: { Authorization: `Bearer ${token}` },
-        params: { fields },
-      });
-      return response.data;
+      // Usamos el token que ya teníamos para llamar a nuestra nueva función helper
+      const flowJson = await this.getFlowJsonContentHelper(flowId, token);
+      flowJsonContent = flowJson;
     } catch (error) {
-      this.logger.error(`Error al obtener el flow ID: ${flowId}`, error);
-      this.throwMetaError(error, 'Error al obtener el flow');
+      // Es normal que falle si el flow está en DRAFT y nunca se le ha subido un JSON
+      this.logger.warn(
+        `No se pudo obtener el flow.json para ${flowId} (puede ser un flow vacío). Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
+      // No relanzamos el error, solo dejamos el JSON como null
     }
+
+    // --- PASO 3: Combinar y retornar ---
+    return {
+      flow_json: flowJsonContent, // Añadimos el JSON (o null) a la respuesta
+    };
+  }
+
+  private async getFlowJsonContentHelper(
+    flowId: string,
+    token: string,
+  ): Promise<any> {
+    const assetsUrl = `${this.baseUrl}/${flowId}/assets`;
+    const assetsResponse = await axios.get(assetsUrl, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    const flowJsonAsset = assetsResponse.data?.data?.find(
+      (asset: any) => asset.asset_type === 'FLOW_JSON',
+    );
+
+    if (!flowJsonAsset || !flowJsonAsset.download_url) {
+      this.logger.warn(
+        `No se encontró un asset 'FLOW_JSON' con download_url para el flow ${flowId}`,
+      );
+      return null;
+    }
+
+    const downloadUrl = flowJsonAsset.download_url;
+    const jsonResponse = await axios.get(downloadUrl, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    return jsonResponse.data;
   }
 
   /**
@@ -719,6 +764,55 @@ Pago de pensión por $290,000 COP\n`,
     } catch (error) {
       this.logger.error(`Error al eliminar flow: ${flowId}`, error);
       this.throwMetaError(error, 'Error al eliminar el flow');
+    }
+  }
+
+  /**
+   * 6. Publicar un Flow
+   * Corresponde a: POST /{flow-id}/publish
+   */
+
+  async publishFlow(flowId: string, name: string, numberId: string) {
+    this.logger.log(`Iniciando publicación de Flow ID: ${flowId}`);
+    const token = await this.whatsappService.getWhatsappToken(numberId);
+
+    const metadataUrl = `${this.baseUrl}/${flowId}`;
+    const form = new FormData();
+    form.append('name', name);
+    form.append('categories', '["OTHER"]');
+    form.append('endpoint_uri', this.urlWebhook || '');
+
+    try {
+      await axios.post(metadataUrl, form, {
+        headers: {
+          ...form.getHeaders(),
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      this.logger.log(`Endpoint URI asignado exitosamente.`);
+    } catch (error) {
+      this.logger.error(
+        `Error al asignar Endpoint URI para flow: ${flowId}`,
+        error,
+      );
+      this.throwMetaError(error, 'Error al asignar el Endpoint URI');
+    }
+
+    this.logger.log(`Intentando publicar el flow...`);
+    const publishUrl = `${this.baseUrl}/${flowId}/publish`;
+
+    try {
+      const response = await axios.post(publishUrl, null, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      this.logger.log(`Flow ${flowId} publicado exitosamente.`);
+      return response.data; // Devuelve { "success": true }
+    } catch (error) {
+      this.logger.error(`Error al publicar flow: ${flowId}`, error);
+      this.throwMetaError(
+        error,
+        'Error al publicar el flow (después de asignar el URI)',
+      );
     }
   }
 
