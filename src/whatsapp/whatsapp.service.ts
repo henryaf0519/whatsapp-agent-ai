@@ -295,6 +295,101 @@ export class WhatsappService {
     }
   }
 
+  async sendFlowDraft(
+    to: string,
+    businessId: string,
+    token: string,
+    payload: any,
+  ): Promise<WhatsAppApiResponse> {
+    try {
+      const body = payload;
+
+      this.logger.log(`Enviando mensaje WhatsApp a: ${to}`);
+
+      let lastError: Error | null = null;
+      const apiUrl = `https://graph.facebook.com/v23.0/${businessId}/messages`;
+      for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
+        try {
+          const response: AxiosResponse<WhatsAppApiResponse> = await axios.post(
+            apiUrl,
+            body,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+              timeout: 5000, // 10 seconds timeout
+            },
+          );
+          return response.data;
+        } catch (error) {
+          lastError = error as Error;
+
+          if (axios.isAxiosError(error)) {
+            // Don't retry on client errors (4xx) except 429
+            const status = error.response?.status;
+            if (status && status >= 400 && status < 500 && status !== 429) {
+              this.handleAxiosError(error, attempt);
+            }
+
+            // Retry on server errors (5xx) and 429
+            if (
+              attempt < this.maxRetries &&
+              (status === 429 || (status && status >= 500))
+            ) {
+              const delayMs = this.retryDelay * Math.pow(2, attempt - 1); // Exponential backoff
+              this.logger.warn(
+                `Reintentando envío de mensaje WhatsApp en ${delayMs}ms (Intento ${attempt}/${this.maxRetries})`,
+              );
+              await this.delay(delayMs);
+              continue;
+            }
+
+            this.handleAxiosError(error, attempt);
+          } else {
+            // Non-Axios error
+            if (attempt < this.maxRetries) {
+              const delayMs = this.retryDelay * attempt;
+              const errorMessage =
+                error instanceof Error ? error.message : String(error);
+              this.logger.warn(
+                `Error no-HTTP, reintentando en ${delayMs}ms (Intento ${attempt}/${this.maxRetries}): ${errorMessage}`,
+              );
+              await this.delay(delayMs);
+              continue;
+            }
+          }
+        }
+      }
+
+      // If we get here, all retries failed
+      const errorMessage = lastError?.message || 'Error desconocido';
+      this.logger.error(
+        `Falló el envío de mensaje WhatsApp después de ${this.maxRetries} intentos: ${errorMessage}`,
+      );
+      throw new HttpException(
+        `Error al enviar mensaje WhatsApp después de ${this.maxRetries} intentos: ${errorMessage}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    } catch (error) {
+      // Re-throw HttpExceptions as-is
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      // Handle unexpected errors
+      this.logger.error(
+        `Error inesperado en sendMessage: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+
+      throw new HttpException(
+        'Error interno del servidor al procesar mensaje WhatsApp',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   async sendInteractiveMessage(
     to: string,
     businessId: string,

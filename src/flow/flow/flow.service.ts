@@ -574,9 +574,6 @@ Pago de pensión por $290,000 COP\n`,
       case 'data_exchange': {
         this.logger.log(`[DYN] Acción data_exchange desde pantalla: ${screen}`);
         this.logger.log(`[DYN] Datos recibidos: ${JSON.stringify(data)}`);
-
-        // --- INICIO DE LA MODIFICACIÓN ---
-
         let nextScreenId: string;
 
         // 1. Determinar la siguiente pantalla (Lógica de Navegación Dinámica)
@@ -1102,6 +1099,116 @@ Pago de pensión por $290,000 COP\n`,
         error,
         'Error al publicar el flow (después de asignar el URI)',
       );
+    }
+  }
+
+  /**
+   * Envía un mensaje de prueba de un flujo a un número específico.
+   * @param flowId ID interno del flujo (de DynamoDB)
+   * @param userId ID del usuario (para obtener credenciales)
+   * @param to Número de teléfono de destino (ej: 573001234567)
+   */
+
+  async sendTestFlow(
+    flowId: string,
+    flowName: string,
+    to: string,
+    screen: string,
+    number_id,
+  ) {
+    this.logger.log(`Iniciando envío de prueba para flow ${flowId} a ${to}`);
+
+    if (!to || !number_id || !flowId || !screen || !flowName) {
+      throw new NotFoundException(
+        'Faltan datos en el payload (to, number_id, flowId, screen, o flowName)',
+      );
+    }
+
+    const token = await this.whatsappService.getWhatsappToken(number_id);
+    if (!token) {
+      throw new NotFoundException(
+        `No se encontró token para number_id: ${number_id}`,
+      );
+    }
+
+    try {
+      this.logger.log(`Paso 1/2: Verificando Endpoint URI...`);
+      await this.updateFlowEndpointUri(flowId, flowName, token);
+      this.logger.log(`Paso 1/2: Endpoint URI verificado.`);
+    } catch (error) {
+      this.logger.error(`Error al publicar flow: ${flowId}`, error);
+      this.throwMetaError(
+        error,
+        'Error al publicar el flow (después de asignar el URI)',
+      );
+    }
+
+    const flowToken = `token_${to}_${number_id}_${flowId}_${Date.now()}`;
+
+    const payload = {
+      messaging_product: 'whatsapp',
+      to: to,
+      recipient_type: 'individual',
+      type: 'interactive',
+      interactive: {
+        type: 'flow',
+        header: { type: 'text', text: 'Prueba de Flujo' },
+        body: { text: `Iniciando prueba` },
+        footer: { text: 'Haz clic para comenzar' },
+        action: {
+          name: 'flow',
+          parameters: {
+            flow_message_version: '3',
+            flow_action: 'navigate',
+            flow_token: flowToken,
+            flow_id: flowId,
+            flow_cta: 'Iniciar Flujo',
+            mode: 'draft',
+            flow_action_payload: {
+              screen: screen,
+            },
+          },
+        },
+      },
+    };
+
+    // 6. Enviar usando WhatsappService
+    this.logger.log(
+      `Enviando payload de prueba a Graph API: ${JSON.stringify(payload)}`,
+    );
+    await this.whatsappService.sendFlowDraft(to, number_id, token, payload);
+
+    return { success: true, message: `Prueba enviada a ${to}` };
+  }
+
+  /**
+   * Actualiza la 'endpoint_uri' (webhook) de un flujo en Meta.
+   */
+  async updateFlowEndpointUri(flowId: string, flowName: string, token: string) {
+    this.logger.log(`Actualizando Endpoint URI para Flow ID: ${flowId}`);
+
+    const metadataUrl = `${this.baseUrl}/${flowId}`;
+    const form = new FormData();
+    form.append('name', flowName); // El nombre es requerido por la API
+    form.append('categories', '["OTHER"]');
+    form.append('endpoint_uri', this.urlWebhook || ''); // El webhook
+
+    try {
+      // Usamos el httpService de NestJS (wrapper de Axios)
+      await axios.post(metadataUrl, form, {
+        headers: {
+          ...form.getHeaders(),
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      this.logger.log(`Endpoint URI asignado exitosamente para ${flowId}.`);
+      return { success: true };
+    } catch (error) {
+      this.logger.error(
+        `Error al asignar Endpoint URI para flow: ${flowId}`,
+        error,
+      );
+      this.throwMetaError(error, 'Error al asignar el Endpoint URI');
     }
   }
 

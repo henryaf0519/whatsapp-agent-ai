@@ -131,17 +131,36 @@ export class FlowController {
    * 6. Publicar un Flow
    */
 
-  @Post('publish') // <-- RUTA CAMBIADA (ya no tiene :flowId)
+  @Post('publish')
   @UseGuards(AuthGuard('jwt'))
   @HttpCode(HttpStatus.OK)
   async publishFlow(
     @Req() req: Request,
-    @Body('flowId') flowId: string, // <-- CAMBIADO (viene del body)
+    @Body('flowId') flowId: string, 
     @Body('name') name: string,
   ) {
     const user = req.user as JwtUser;
 
     // Pasamos todos los parámetros al servicio
     return this.flowService.publishFlow(flowId, name, user.number_id);
+  }
+
+  @Post(':internalFlowId/test')
+  @UseGuards(AuthGuard('jwt'))
+  async sendTestFlow(
+    @Req() req: Request,
+    @Body('flowId') flowId: string,
+    @Body('to') to: string,
+    @Body('screen') screen: string,
+    @Body('flowName') flowName: string,
+  ) {
+    const user = req.user as JwtUser;
+    return this.flowService.sendTestFlow(
+      flowId,
+      flowName,
+      to,
+      screen,
+      user.number_id,
+    );
   }
 }
