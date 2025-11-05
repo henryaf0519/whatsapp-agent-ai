@@ -573,17 +573,46 @@ Pago de pensión por $290,000 COP\n`,
 
       case 'data_exchange': {
         this.logger.log(`[DYN] Acción data_exchange desde pantalla: ${screen}`);
+        this.logger.log(`[DYN] Datos recibidos: ${JSON.stringify(data)}`);
+
+        // --- INICIO DE LA MODIFICACIÓN ---
+
+        let nextScreenId: string;
+
+        // 1. Determinar la siguiente pantalla (Lógica de Navegación Dinámica)
+        if (data && data.selection) {
+          // Caso 1: Es un ScreenNode (Menú)
+          // El frontend nos envía el ID de la pantalla de destino.
+          nextScreenId = data.selection; // Ej: "DATOS"
+          this.logger.log(
+            `[DYN] Navegando por data.selection: ${nextScreenId}`,
+          );
+        } else if (data && data.catalog_selection) {
+          // Caso 2: Es un CatalogNode
+          nextScreenId = data.catalog_selection;
+          this.logger.log(
+            `[DYN] Navegando por data.catalog_selection: ${nextScreenId}`,
+          );
+        } else {
+          // Caso 3: Fallback (Ej: un FormNode que solo captura datos)
+          // Usa el routing_model para encontrar el (único) siguiente paso.
+          // Esta es la lógica que tenías antes.
+          nextScreenId = flowJson.routing_model[screen]?.[0];
+          this.logger.log(
+            `[DYN] Navegando por routing_model (fallback): ${nextScreenId}`,
+          );
+        }
+
+        // --- FIN DE LA MODIFICACIÓN ---
+
         this.logger.log(
-          `[DYN] Routing model actual: ${JSON.stringify(flowJson.routing_model)}`,
+          `[DYN] Siguiente pantalla seleccionada: ${nextScreenId}`,
         );
 
-        // Encontrar la siguiente pantalla usando el routing_model
-        const nextScreenId = flowJson.routing_model[screen]?.[0];
-        this.logger.log(`[DYN] Siguiente pantalla: ${nextScreenId}`);
-
         if (!nextScreenId) {
+          // Modifiqué el error para incluir los datos y facilitar el debug
           throw new NotFoundException(
-            `No se encontró ruta de navegación para la pantalla "${screen}" en routing_model`,
+            `No se encontró ruta de navegación para la pantalla "${screen}" (datos: ${JSON.stringify(data)}) en routing_model`,
           );
         }
 
@@ -594,34 +623,26 @@ Pago de pensión por $290,000 COP\n`,
           (s) => s.id === nextScreenId,
         );
 
-        // --- INICIO DE LA CORRECCIÓN DEL ERROR ---
+        // Esta lógica para generar los 'details' es correcta y no la he tocado.
         if (nextScreenDef && nextScreenDef.data) {
-          // CORRECCIÓN: Chequeamos si la *definición* de la pantalla
-          // espera una propiedad 'details', no el *valor* de esa propiedad.
           if (
             Object.prototype.hasOwnProperty.call(nextScreenDef.data, 'details')
           ) {
             this.logger.log(
               `[DYN] Generando datos 'details' para la pantalla ${nextScreenId}`,
             );
-            // Si es así, generamos dinámicamente el resumen
             const details = this._buildDynamicDetails(newSessionData);
             this.logger.log(
               `[DYN] Resumen generado: ${JSON.stringify(details)}`,
             );
-            // Y lo asignamos al objeto de datos que se enviará
             nextScreenData = { details: details };
-
-            // Guardamos el resumen para el dashboard
-           // await this.saveMessage(numberId, userNumber, details);
           }
-          // Aquí se podrían añadir más `if` para otras variables que las pantallas esperen
         }
-        // --- FIN DE LA CORRECCIÓN DEL ERROR ---
 
+        // Preparamos la respuesta para Meta usando el ID de pantalla dinámico
         responseData = {
           version,
-          screen: nextScreenId,
+          screen: nextScreenId, // <--- Aquí se usa el ID dinámico
           data: nextScreenData,
         };
         break;
