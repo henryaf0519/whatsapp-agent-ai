@@ -383,7 +383,7 @@ export class FlowService {
 *Dirección:* ${allData.direccion || ''}`,
             },
           };
-          this.saveMessage(businessId, userNumber, responseData);
+          this.saveMessage(businessId, userNumber, responseData.data.details);
 
           // NUEVO: Lógica para las nuevas pantallas
         } else if (screen === 'POLICIES') {
@@ -404,7 +404,7 @@ export class FlowService {
             },
           };
 
-          this.saveMessage(businessId, userNumber, responseData);
+          this.saveMessage(businessId, userNumber, responseData.data.details);
         } else if (screen === 'MONTHLY') {
           const doc = data.doc;
           const flowType = 'Pago de Mensualidad';
@@ -429,7 +429,7 @@ Valor a Pagar: $${user.pago.toLocaleString('es-CO')} COP
                 \n`,
               },
             };
-            this.saveMessage(businessId, userNumber, responseData);
+            this.saveMessage(businessId, userNumber, responseData.data.details);
           } else {
             responseData = {
               version,
@@ -468,7 +468,7 @@ Valor a Pagar: $${user.pago.toLocaleString('es-CO')} COP
 Pago de pensión por $290,000 COP\n`,
             },
           };
-          this.saveMessage(businessId, userNumber, responseData);
+          this.saveMessage(businessId, userNumber, responseData.data.details);
         } else if (screen === 'ASESOR') {
           // <--- AÑADIDO
           const question = data.question;
@@ -483,7 +483,7 @@ Pago de pensión por $290,000 COP\n`,
 \n`,
             },
           };
-          this.saveMessage(businessId, userNumber, responseData);
+          this.saveMessage(businessId, userNumber, responseData.data.details);
         } else if (screen === 'CONFIRM') {
           this.logger.log(
             `Flujo completado por el usuario desde la pantalla CONFIRM.`,
