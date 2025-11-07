@@ -629,6 +629,9 @@ Pago de pensión por $290,000 COP\n`,
               `[DYN] Generando datos 'details' para la pantalla ${nextScreenId}`,
             );
             const details = this._buildDynamicDetails(newSessionData);
+            this.logger.log(
+              `[DYN] Detalles generados: ${JSON.stringify(details)}`,
+            );
             await this.saveMessage(numberId, userNumber, details);
             this.logger.log(
               `[DYN] Resumen generado: ${JSON.stringify(details)}`,
@@ -834,13 +837,13 @@ Pago de pensión por $290,000 COP\n`,
   private async saveMessage(
     businessId: string,
     userNumber: string,
-    responseData: any,
+    details: any,
   ) {
     await this.dynamoService.saveMessage(
       businessId,
       userNumber,
       userNumber,
-      responseData.data.details || '',
+      details || '',
       '',
       'RECEIVED',
       'respflow',
@@ -848,7 +851,7 @@ Pago de pensión por $290,000 COP\n`,
     );
     const sendSocketUser = {
       from: userNumber,
-      text: responseData.data.details || '',
+      text: details || '',
       type: 'respflow',
       url: '',
       SK: `MESSAGE#${new Date().toISOString()}`,
