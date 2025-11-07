@@ -629,6 +629,7 @@ Pago de pensión por $290,000 COP\n`,
               `[DYN] Generando datos 'details' para la pantalla ${nextScreenId}`,
             );
             const details = this._buildDynamicDetails(newSessionData);
+            await this.saveMessage(numberId, userNumber, details);
             this.logger.log(
               `[DYN] Resumen generado: ${JSON.stringify(details)}`,
             );
