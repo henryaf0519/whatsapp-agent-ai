@@ -1184,7 +1184,7 @@ export class DynamoService {
   /**
    * Obtiene todos los disparadores de Flow para un negocio.
    */
-  async getFlowTriggersForBusiness(numberId: string): Promise<any[]> {
+  async getFlowTriggersForBusiness(numberId: string): Promise<any[] | null> {
     const command = new QueryCommand({
       TableName: 'FlowTriggers',
       KeyConditionExpression: 'number_id = :numberId',
@@ -1198,7 +1198,11 @@ export class DynamoService {
       this.logger.log(
         `Obtenidos ${response.Items?.length || 0} disparadores para ${numberId}`,
       );
-      return response.Items || [];
+      this.logger.debug(JSON.stringify(response.Items));
+      if (!response.Items || (response.Items as any[]).length === 0) {
+        return null;
+      }
+      return response.Items as any[];
     } catch (error) {
       this.logger.error(
         `Error obteniendo disparadores para ${numberId}`,
