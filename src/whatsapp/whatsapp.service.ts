@@ -553,6 +553,7 @@ export class WhatsappService {
 
   async sendFlowMessage(
     to: string,
+    name: string,
     businessId: string,
   ): Promise<WhatsAppApiResponse> {
     try {
@@ -560,7 +561,7 @@ export class WhatsappService {
       const whatsappToken = await this.getWhatsappToken(businessId);
 
       // 2. Buscar todos los triggers para ese negocio
-      let trigger: any = await this.db.getFlowTriggersForBusiness(businessId)
+      let trigger: any = await this.db.getFlowTriggersForBusiness(businessId);
       trigger = trigger[0];
       this.logger.debug(`Todos los triggers: ${JSON.stringify(trigger)}`);
 
@@ -578,6 +579,10 @@ export class WhatsappService {
       // 5. Construir el token y el payload dinámicamente
       const flowToken = `token_${to}_${businessId}_${trigger.flow_id}_${Date.now()}`;
 
+      const headerText = trigger.header_text
+        ? trigger.header_text.replace(/nombre/gi, name)
+        : '';
+
       // Construcción dinámica del payload basado en el trigger
       const payload = {
         messaging_product: 'whatsapp',
@@ -588,7 +593,7 @@ export class WhatsappService {
           type: 'flow',
           header: {
             type: 'text',
-            text: trigger.header_text ?? '',
+            text: headerText ?? '',
           },
           body: {
             text:
@@ -624,8 +629,6 @@ export class WhatsappService {
       this.logger.log(
         `Enviando mensaje de FLUJO DINÁMICO a: ${to} (Trigger: ${trigger.name})`,
       );
-      this.logger.debug(`Payload del flujo: ${JSON.stringify(payload)}`);
-
       const apiUrl = `https://graph.facebook.com/v23.0/${businessId}/messages`;
 
       // 6. Realizar la llamada a la API (sin bucle de reintentos)

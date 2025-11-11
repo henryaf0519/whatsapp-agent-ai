@@ -18,6 +18,7 @@ import { AgentOpenIaService } from 'src/agent/agent-open-ia/agent-open-ia.servic
 import { DynamoService } from 'src/database/dynamo/dynamo.service';
 import { SocketGateway } from 'src/socket/socket.gateway';
 import { TranscriptionService } from '../transcription/transcription.service';
+import { json } from 'stream/consumers';
 
 interface WhatsAppMessage {
   from: string;
@@ -663,7 +664,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
       } else if (reply.type === 'flow') {
         this.logger.log('Iniciando flow:', reply.template);
 
-        await this.whatsappService.sendFlowMessage(message.from, businessId);
+        await this.whatsappService.sendFlowMessage(message.from, contactName, businessId);
       } else {
         await this.whatsappService.sendMessage(
           message.from,
