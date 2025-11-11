@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/restrict-template-expressions */
 /* eslint-disable @typescript-eslint/await-thenable */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
@@ -540,8 +541,17 @@ Pago de pensión por $290,000 COP\n`,
       throw new Error('No se pudo parsear flow_token o falta flow_id');
     }
 
-    const flowJson = await this._getFlowJson(numberId, flow_id);
+    const fullFlowData = await this._getFlowJson(numberId, flow_id);
     let responseData: any;
+    if (!fullFlowData.flowJson || !fullFlowData.flowNavigate) {
+      this.logger.error(
+        `[DYN] El JSON del flujo ${flow_id} no tiene la estructura esperada { flowJson: ..., flowNavigate: ... }`,
+      );
+      throw new Error('Estructura de JSON de flujo inválida');
+    }
+
+    const flowJson = fullFlowData.flowJson; // El JSON para Meta
+    const flowNavigate = fullFlowData.flowNavigate;
 
     // 3. Obtener y fusionar datos de sesión
     const currentSessionData = this.flowSessions[flow_token] || {};
@@ -574,78 +584,149 @@ Pago de pensión por $290,000 COP\n`,
       case 'data_exchange': {
         this.logger.log(`[DYN] Acción data_exchange desde pantalla: ${screen}`);
         this.logger.log(`[DYN] Datos recibidos: ${JSON.stringify(data)}`);
-        let nextScreenId: string;
 
-        // 1. Determinar la siguiente pantalla (Lógica de Navegación Dinámica)
-        if (data && data.selection) {
-          // Caso 1: Es un ScreenNode (Menú)
-          // El frontend nos envía el ID de la pantalla de destino.
-          nextScreenId = data.selection; // Ej: "DATOS"
+        let nextScreenId: string | null = null;
+        let selectedOptionId: string | null = null;
+        let nextScreenData = {}; // Definido en el scope principal
+
+        // --- INICIO DE LA LÓGICA DE NAVEGACIÓN ---
+
+        // 1. ¡COMPROBACIÓN PRIORITARIA DE FINALIZACIÓN!
+        if (data && data.flow_completed === 'true') {
           this.logger.log(
-            `[DYN] Navegando por data.selection: ${nextScreenId}`,
+            `[DYN] ¡Flujo finalizado por el usuario en la pantalla ${screen}!`,
           );
-        } else if (data && data.catalog_selection) {
-          // Caso 2: Es un CatalogNode
-          nextScreenId = data.catalog_selection;
-          this.logger.log(
-            `[DYN] Navegando por data.catalog_selection: ${nextScreenId}`,
-          );
+
+          try {
+            const details = this._buildDynamicDetails(
+              newSessionData,
+              flowNavigate,
+            );
+
+            await this.saveMessage(numberId, userNumber, details);
+
+            this.logger.log(
+              `[DYN] Resumen generado y guardado: ${JSON.stringify(details)}`,
+            );
+          } catch (e) {
+            this.logger.error(`[DYN] Error al guardar el resumen final: ${e}`);
+          }
+          // ================================================================
+
+          // 'nextScreenId' se queda como 'null' para que el flujo termine.
         } else {
-          // Caso 3: Fallback (Ej: un FormNode que solo captura datos)
-          // Usa el routing_model para encontrar el (único) siguiente paso.
-          // Esta es la lógica que tenías antes.
-          nextScreenId = flowJson.routing_model[screen]?.[0];
-          this.logger.log(
-            `[DYN] Navegando por routing_model (fallback): ${nextScreenId}`,
-          );
-        }
+          // --- LÓGICA DE NAVEGACIÓN (si el flujo NO ha terminado) ---
 
-        // --- FIN DE LA MODIFICACIÓN ---
+          // 2. Buscar si 'data' contiene una clave cuyo VALOR sea un ID de opción.
+          const dynamicKey = Object.keys(data).find(
+            (key) =>
+              typeof data[key] === 'string' &&
+              (data[key].startsWith('opcion_') ||
+                data[key].startsWith('cat_opt_')),
+          );
+
+          if (dynamicKey) {
+            selectedOptionId = data[dynamicKey];
+          }
+
+          // 3. Determinar la siguiente pantalla
+          if (selectedOptionId) {
+            // --- CASO DE OPCIONES (ScreenNode, CatalogNode) ---
+            if (flowNavigate && flowNavigate[selectedOptionId]) {
+              nextScreenId = flowNavigate[selectedOptionId].pantalla;
+              this.logger.log(
+                `[DYN] Pantalla actual: ${screen}. Opción: ${selectedOptionId}. Próxima: ${nextScreenId}`,
+              );
+            } else {
+              this.logger.error(
+                `[DYN] ¡ERROR! Opción '${selectedOptionId}' no encontrada en flowNavigate.`,
+              );
+              // 'nextScreenId' sigue 'null' y será capturado abajo
+            }
+          } else {
+            // --- CASO FALLBACK (FormNode) ---
+            nextScreenId = flowJson.routing_model[screen]?.[0];
+            if (nextScreenId) {
+              this.logger.log(
+                `[DYN] No hay opción. Fallback a routing_model: ${nextScreenId}`,
+              );
+            }
+          }
+        }
+        // --- FIN DE LA LÓGICA DE NAVEGACIÓN ---
 
         this.logger.log(
           `[DYN] Siguiente pantalla seleccionada: ${nextScreenId}`,
         );
 
-        if (!nextScreenId) {
-          // Modifiqué el error para incluir los datos y facilitar el debug
-          throw new NotFoundException(
-            `No se encontró ruta de navegación para la pantalla "${screen}" (datos: ${JSON.stringify(data)}) en routing_model`,
+        // 4. MANEJO DE LA RESPUESTA FINAL
+        if (nextScreenId) {
+          // --- CASO A: HAY PANTALLA SIGUIENTE ---
+
+          // Lógica para preparar 'details' para la pantalla de confirmación
+          const nextScreenDef = flowJson.screens.find(
+            (s) => s.id === nextScreenId,
           );
-        }
 
-        let nextScreenData = {};
-
-        // Verificamos si la *siguiente* pantalla (ej. CONFIRMACION) espera datos
-        const nextScreenDef = flowJson.screens.find(
-          (s) => s.id === nextScreenId,
-        );
-
-        // Esta lógica para generar los 'details' es correcta y no la he tocado.
-        if (nextScreenDef && nextScreenDef.data) {
-          if (
-            Object.prototype.hasOwnProperty.call(nextScreenDef.data, 'details')
-          ) {
-            this.logger.log(
-              `[DYN] Generando datos 'details' para la pantalla ${nextScreenId}`,
-            );
-            const details = this._buildDynamicDetails(newSessionData);
-            this.logger.log(
-              `[DYN] Detalles generados: ${JSON.stringify(details)}`,
-            );
-            await this.saveMessage(numberId, userNumber, details);
-            this.logger.log(
-              `[DYN] Resumen generado: ${JSON.stringify(details)}`,
-            );
-            nextScreenData = { details: details };
+          if (nextScreenDef && nextScreenDef.data) {
+            if (
+              Object.prototype.hasOwnProperty.call(
+                nextScreenDef.data,
+                'details',
+              )
+            ) {
+              this.logger.log(
+                `[DYN] Generando datos 'details' para MOSTRAR en la pantalla ${nextScreenId}`,
+              );
+              const details = this._buildDynamicDetails(
+                newSessionData,
+                flowNavigate,
+              );
+              nextScreenData = { details: details };
+              this.logger.log(
+                `[DYN] 'details' generados para mostrar: ${JSON.stringify(details)}`,
+              );
+            }
           }
+
+          // Respuesta para navegar a la siguiente pantalla
+          responseData = {
+            version,
+            screen: nextScreenId,
+            data: nextScreenData,
+          };
+        } else {
+          // --- CASO B: NO HAY PANTALLA SIGUIENTE (FLUJO TERMINA) ---
+
+          if (data && data.flow_completed === 'true') {
+            this.logger.log(
+              '[DYN] Flujo completado. Enviando respuesta de finalización a Meta.',
+            );
+          } else {
+            this.logger.log(
+              `[DYN] Pantalla terminal '${screen}' alcanzada. Enviando respuesta de finalización a Meta.`,
+            );
+          }
+
+          // ✅ ESTA ES LA RESPUESTA CORRECTA PARA FINALIZAR UN 'data_exchange'
+          // Se envía un objeto 'data' (puede ser vacío) pero SIN clave 'screen'.
+          responseData = {
+            // CLAVE 1: La pantalla debe ser "SUCCESS"
+            screen: 'SUCCESS',
+            // CLAVE 2: La estructura de data debe ser la completa
+            data: {
+              extension_message_response: {
+                params: {
+                  // Debes asegurar que el flow_token esté disponible en el scope del case
+                  flow_token: data.flow_token || 'TEMPORARY_FLOW_TOKEN',
+                  summary_saved: true,
+                  // Puedes añadir aquí el resumen guardado
+                },
+              },
+            },
+          };
         }
 
-        // Preparamos la respuesta para Meta usando el ID de pantalla dinámico
-        responseData = {
-          version,
-          screen: nextScreenId, // <--- Aquí se usa el ID dinámico
-          data: nextScreenData,
-        };
         break;
       }
 
@@ -735,7 +816,10 @@ Pago de pensión por $290,000 COP\n`,
 
     try {
       // El JSON está guardad o como un string, necesitamos parsearlo
-      return JSON.parse(definitionItem.flow_definition);
+      return {
+        flowJson: JSON.parse(definitionItem.flow_definition),
+        flowNavigate: JSON.parse(definitionItem.navigation),
+      };
     } catch (error) {
       this.logger.error(
         `[DYN] Error parseando JSON para flowId: ${flowId}`,
@@ -749,20 +833,33 @@ Pago de pensión por $290,000 COP\n`,
    * Construye un string de detalles 100% dinámico basado en los datos de la sesión.
    * No asume nombres de campos como 'nombre' o 'email'.
    */
-  private _buildDynamicDetails(sessionData: any, title?: string): string {
+  private _buildDynamicDetails(
+    sessionData: any,
+    flowNavigate: any,
+    title?: string,
+  ): string {
     const details: string[] = [];
 
     if (title) {
       details.push(title);
       details.push('-----------------');
+    } else {
+      details.push('✅ Este es el resumen de tu flujo:');
     }
 
     for (const key in sessionData) {
+      // key será "menu" o "selection"
       if (Object.prototype.hasOwnProperty.call(sessionData, key)) {
-        const value = sessionData[key];
-        // Capitalizar la primera letra de la clave para que se vea bien
+        const optionId = sessionData[key];
+
+        // --- 2. ¡AQUÍ ESTÁ LA TRADUCCIÓN! ---
+        const navInfo = flowNavigate[optionId];
+        const readableValue = navInfo ? navInfo.valor : optionId;
+        // ------------------------------------
+
+        // Capitalizar la primera letra de la clave
         const formattedKey = key.charAt(0).toUpperCase() + key.slice(1);
-        details.push(`${formattedKey}: ${value || 'No especificado'}`);
+        details.push(`${formattedKey}: ${readableValue || 'No especificado'}`);
       }
     }
 
@@ -899,10 +996,16 @@ Pago de pensión por $290,000 COP\n`,
     this.logger.log(`Obteniendo Flow (metadata y JSON) con ID: ${flowId}`);
     const token = await this.whatsappService.getWhatsappToken(numberId);
     let flowJsonContent: any = null; // Default a null si no se encuentra
+    let flowN: any = null;
     try {
       // Usamos el token que ya teníamos para llamar a nuestra nueva función helper
       const flowJson = await this.getFlowJsonContentHelper(flowId, token);
       flowJsonContent = flowJson;
+
+      flowN = await this.dynamoService.getClientFlowDefinition(
+        numberId,
+        flowId,
+      );
     } catch (error) {
       // Es normal que falle si el flow está en DRAFT y nunca se le ha subido un JSON
       this.logger.warn(
@@ -911,9 +1014,9 @@ Pago de pensión por $290,000 COP\n`,
       // No relanzamos el error, solo dejamos el JSON como null
     }
 
-    // --- PASO 3: Combinar y retornar ---
     return {
-      flow_json: flowJsonContent, // Añadimos el JSON (o null) a la respuesta
+      flow_json: flowJsonContent,
+      navigation: JSON.parse(flowN?.navigation) || null,
     };
   }
 
@@ -972,7 +1075,12 @@ Pago de pensión por $290,000 COP\n`,
    * 4. Actualizar el contenido de un Flow (subiendo el flow.json)
    * Corresponde a: POST /{flow_id}/assets
    */
-  async updateFlowAssets(flowId: string, numberId: string, flowJson: string) {
+  async updateFlowAssets(
+    flowId: string,
+    numberId: string,
+    flowJson: string,
+    navigation: string,
+  ) {
     this.logger.log(
       `Actualizando assets (flow.json) para el Flow ID: ${flowId}, Cliente: ${numberId}`,
     );
@@ -1009,6 +1117,7 @@ Pago de pensión por $290,000 COP\n`,
           numberId,
           flowId,
           flowJson,
+          navigation,
           `Definición de flujo para ${flowId}`,
         );
 

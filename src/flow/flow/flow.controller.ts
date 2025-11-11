@@ -125,10 +125,16 @@ export class FlowController {
   async updateFlowAssets(
     @Param('flowId') flowId: string,
     @Req() req: Request,
-    @Body('flowJson') flowJson: string, // Asumimos que el frontend envía el JSON como un string
+    @Body('flowJson') flowJson: string,
+    @Body('navigationMap') navigation: string,
   ) {
     const user = req.user as JwtUser;
-    return this.flowService.updateFlowAssets(flowId, user.number_id, flowJson);
+    return this.flowService.updateFlowAssets(
+      flowId,
+      user.number_id,
+      flowJson,
+      navigation,
+    );
   }
 
   /**

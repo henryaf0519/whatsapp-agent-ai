@@ -1090,12 +1090,14 @@ export class DynamoService {
     numberId: string,
     flowId: string,
     flowJson: string,
+    navigation: string,
     description: string = 'Definición de flujo',
   ): Promise<any> {
     const item = {
       number_id: numberId,
       flow_id: flowId,
       flow_definition: flowJson,
+      navigation: navigation,
       description: description,
       updatedAt: new Date().toISOString(),
     };
