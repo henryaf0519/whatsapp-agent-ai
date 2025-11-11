@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import {
@@ -14,6 +16,9 @@ import { S3ConversationLogService } from 'src/conversation-log/s3-conversation-l
 import { Readable } from 'stream';
 import { DynamoService } from 'src/database/dynamo/dynamo.service';
 import FormData from 'form-data';
+import { CreateTemplateDto } from 'src/whatsapp-templates/dto/create-template.dto';
+import { Stream } from 'stream';
+import { UpdateTemplateDto } from 'src/whatsapp-templates/dto/update-template.dto';
 
 interface WhatsAppMessageBody {
   messaging_product: string;
@@ -290,6 +295,101 @@ export class WhatsappService {
     }
   }
 
+  async sendFlowDraft(
+    to: string,
+    businessId: string,
+    token: string,
+    payload: any,
+  ): Promise<WhatsAppApiResponse> {
+    try {
+      const body = payload;
+
+      this.logger.log(`Enviando mensaje WhatsApp a: ${to}`);
+
+      let lastError: Error | null = null;
+      const apiUrl = `https://graph.facebook.com/v23.0/${businessId}/messages`;
+      for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
+        try {
+          const response: AxiosResponse<WhatsAppApiResponse> = await axios.post(
+            apiUrl,
+            body,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+              timeout: 5000, // 10 seconds timeout
+            },
+          );
+          return response.data;
+        } catch (error) {
+          lastError = error as Error;
+
+          if (axios.isAxiosError(error)) {
+            // Don't retry on client errors (4xx) except 429
+            const status = error.response?.status;
+            if (status && status >= 400 && status < 500 && status !== 429) {
+              this.handleAxiosError(error, attempt);
+            }
+
+            // Retry on server errors (5xx) and 429
+            if (
+              attempt < this.maxRetries &&
+              (status === 429 || (status && status >= 500))
+            ) {
+              const delayMs = this.retryDelay * Math.pow(2, attempt - 1); // Exponential backoff
+              this.logger.warn(
+                `Reintentando envío de mensaje WhatsApp en ${delayMs}ms (Intento ${attempt}/${this.maxRetries})`,
+              );
+              await this.delay(delayMs);
+              continue;
+            }
+
+            this.handleAxiosError(error, attempt);
+          } else {
+            // Non-Axios error
+            if (attempt < this.maxRetries) {
+              const delayMs = this.retryDelay * attempt;
+              const errorMessage =
+                error instanceof Error ? error.message : String(error);
+              this.logger.warn(
+                `Error no-HTTP, reintentando en ${delayMs}ms (Intento ${attempt}/${this.maxRetries}): ${errorMessage}`,
+              );
+              await this.delay(delayMs);
+              continue;
+            }
+          }
+        }
+      }
+
+      // If we get here, all retries failed
+      const errorMessage = lastError?.message || 'Error desconocido';
+      this.logger.error(
+        `Falló el envío de mensaje WhatsApp después de ${this.maxRetries} intentos: ${errorMessage}`,
+      );
+      throw new HttpException(
+        `Error al enviar mensaje WhatsApp después de ${this.maxRetries} intentos: ${errorMessage}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    } catch (error) {
+      // Re-throw HttpExceptions as-is
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      // Handle unexpected errors
+      this.logger.error(
+        `Error inesperado en sendMessage: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+
+      throw new HttpException(
+        'Error interno del servidor al procesar mensaje WhatsApp',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   async sendInteractiveMessage(
     to: string,
     businessId: string,
@@ -453,38 +553,73 @@ export class WhatsappService {
 
   async sendFlowMessage(
     to: string,
+    name: string,
     businessId: string,
   ): Promise<WhatsAppApiResponse> {
     try {
-      // Validate inputs
+      // 1. Obtener el token de WhatsApp
       const whatsappToken = await this.getWhatsappToken(businessId);
 
+      // 2. Buscar todos los triggers para ese negocio
+      let trigger: any = await this.db.getFlowTriggersForBusiness(businessId);
+      trigger = trigger[0];
+      this.logger.debug(`Todos los triggers: ${JSON.stringify(trigger)}`);
+
+      // 4. Validar que el trigger exista
+      if (!trigger) {
+        this.logger.error(
+          `No se encontró un FlowTrigger ACTIVO con el nombre: "${trigger}" para el businessId: ${businessId}`,
+        );
+        throw new HttpException(
+          `Flow trigger "${trigger}" no encontrado o no está activo.`,
+          HttpStatus.NOT_FOUND,
+        );
+      }
+
+      // 5. Construir el token y el payload dinámicamente
+      const flowToken = `token_${to}_${businessId}_${trigger.flow_id}_${Date.now()}`;
+
+      const headerText = trigger.header_text
+        ? trigger.header_text.replace(/nombre/gi, name)
+        : '';
+
+      // Construcción dinámica del payload basado en el trigger
       const payload = {
         messaging_product: 'whatsapp',
         to: to,
+        recipient_type: 'individual',
         type: 'interactive',
         interactive: {
           type: 'flow',
           header: {
             type: 'text',
-            text: 'Bienvenido a Afiliamos',
+            text: headerText ?? '',
           },
           body: {
-            text: '¡Hola! Toca el botón de abajo para explorar nuestros servicios en el menú interactivo.',
+            text:
+              trigger.body_text ||
+              'Por favor, interactúa con el siguiente flujo.',
           },
+
           footer: {
-            text: 'Tu aliado en seguridad social.',
+            text: trigger.footer_text ?? '',
           },
+
           action: {
             name: 'flow',
             parameters: {
               flow_message_version: '3',
-              flow_id: '1340184727745283',
-              flow_token: `token_${to}_${businessId}_${Date.now()}`,
-              flow_cta: '▶️ Abrir Menú',
+              flow_id: trigger.flow_id, // Dinámico
+              flow_token: flowToken, // Dinámico
+              flow_cta: trigger.flow_cta, // Dinámico
               flow_action: 'navigate',
               flow_action_payload: {
-                screen: 'WELCOME',
+                screen: trigger.screen_id, // Dinámico
+                // Añadir datos iniciales solo si existen y no están vacíos
+                ...(trigger.initial_data &&
+                  Object.keys(trigger.initial_data).length > 0 && {
+                    data: trigger.initial_data,
+                  }),
               },
             },
           },
@@ -492,90 +627,43 @@ export class WhatsappService {
       };
 
       this.logger.log(
-        `Enviando mensaje de plantilla WhatsApp a : ${JSON.stringify(payload)}`,
+        `Enviando mensaje de FLUJO DINÁMICO a: ${to} (Trigger: ${trigger.name})`,
       );
-
       const apiUrl = `https://graph.facebook.com/v23.0/${businessId}/messages`;
 
-      let lastError: Error | undefined;
-
-      for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
-        try {
-          const response: AxiosResponse<WhatsAppApiResponse> = await axios.post(
-            apiUrl,
-            payload,
-            {
-              headers: {
-                Authorization: `Bearer ${whatsappToken}`,
-                'Content-Type': 'application/json',
-              },
-              timeout: 5000, // 10 seconds timeout
-            },
-          );
-          return response.data;
-        } catch (error) {
-          lastError = error as Error;
-
-          if (axios.isAxiosError(error)) {
-            // Don't retry on client errors (4xx) except 429
-            const status = error.response?.status;
-            if (status && status >= 400 && status < 500 && status !== 429) {
-              this.handleAxiosError(error, attempt);
-            }
-
-            // Retry on server errors (5xx) and 429
-            if (
-              attempt < this.maxRetries &&
-              (status === 429 || (status && status >= 500))
-            ) {
-              const delayMs = this.retryDelay * Math.pow(2, attempt - 1); // Exponential backoff
-              this.logger.warn(
-                `Reintentando envío de mensaje WhatsApp en ${delayMs}ms (Intento ${attempt}/${this.maxRetries})`,
-              );
-              await this.delay(delayMs);
-              continue;
-            }
-
-            this.handleAxiosError(error, attempt);
-          } else {
-            // Non-Axios error
-            if (attempt < this.maxRetries) {
-              const delayMs = this.retryDelay * attempt;
-              const errorMessage =
-                error instanceof Error ? error.message : String(error);
-              this.logger.warn(
-                `Error no-HTTP, reintentando en ${delayMs}ms (Intento ${attempt}/${this.maxRetries}): ${errorMessage}`,
-              );
-              await this.delay(delayMs);
-              continue;
-            }
-          }
-        }
-      }
-
-      // If we get here, all retries failed
-      const errorMessage = lastError?.message || 'Error desconocido';
-      this.logger.error(
-        `Falló el envío de mensaje WhatsApp después de ${this.maxRetries} intentos: ${errorMessage}`,
+      // 6. Realizar la llamada a la API (sin bucle de reintentos)
+      const response: AxiosResponse<WhatsAppApiResponse> = await axios.post(
+        apiUrl,
+        payload,
+        {
+          headers: {
+            Authorization: `Bearer ${whatsappToken}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 5000,
+        },
       );
-      throw new HttpException(
-        `Error al enviar mensaje WhatsApp después de ${this.maxRetries} intentos: ${errorMessage}`,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+
+      return response.data;
     } catch (error) {
-      // Re-throw HttpExceptions as-is
+      // Re-throw HttpExceptions (como nuestro 404 de "trigger no encontrado")
       if (error instanceof HttpException) {
         throw error;
       }
 
-      // Handle unexpected errors
+      // Lanzar errores de Axios usando el helper existente
+      if (axios.isAxiosError(error)) {
+        // Usamos 1 como número de intento, ya que no hay reintentos
+        this.handleAxiosError(error, 1);
+      }
+
+      // Manejar otros errores inesperados
       this.logger.error(
-        `Error inesperado en sendMessage: ${error instanceof Error ? error.message : String(error)}`,
+        `Error inesperado en sendFlowMessage: ${error instanceof Error ? error.message : String(error)}`,
         error instanceof Error ? error.stack : undefined,
       );
-
       throw new HttpException(
-        'Error interno del servidor al procesar mensaje WhatsApp',
+        'Error interno del servidor al procesar el flujo',
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -821,7 +909,220 @@ export class WhatsappService {
     }
   }
 
-  private async getWhatsappToken(businessId: string): Promise<string> {
+  async createMessageTemplate(
+    business_id: string,
+    wabaId: string,
+    templateData: CreateTemplateDto,
+  ): Promise<any> {
+    const whatsappToken = await this.getWhatsappToken(business_id);
+    const apiUrl = `https://graph.facebook.com/v22.0/${wabaId}/message_templates`;
+
+    this.logger.log(
+      `Enviando solicitud para crear plantilla: ${templateData.name}`,
+    );
+    this.logger.debug(
+      `Payload final de la plantilla: ${JSON.stringify(templateData, null, 2)}`,
+    );
+
+    try {
+      const response = await axios.post(apiUrl, templateData, {
+        headers: {
+          Authorization: `Bearer ${whatsappToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      this.logger.log(`Plantilla "${templateData.name}" creada exitosamente.`);
+      return response.data;
+    } catch (error) {
+      this.logger.error('Error al intentar crear la plantilla en Meta.');
+      this.throwMetaError(error, 'Error al crear la plantilla en Meta');
+    }
+  }
+
+  async updateTemplate(
+    businessId: string,
+    templateId: string,
+    updateTemplateDto: UpdateTemplateDto,
+  ): Promise<any> {
+    const whatsappToken = await this.getWhatsappToken(businessId);
+    const url = `https://graph.facebook.com/v22.0/${templateId}`;
+
+    // El payload solo necesita los componentes, como en el ejemplo.
+    const payload = {
+      components: updateTemplateDto.components,
+    };
+
+    this.logger.log(`Intentando actualizar la plantilla con ID: ${templateId}`);
+    this.logger.debug(`URL de la petición: ${url}`);
+    this.logger.debug(`Payload enviado: ${JSON.stringify(payload)}`);
+
+    try {
+      const response = await axios.post(url, payload, {
+        headers: {
+          Authorization: `Bearer ${whatsappToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      this.logger.log(
+        `Plantilla ${templateId} actualizada exitosamente.`,
+        response.data,
+      );
+      return response.data;
+    } catch (error) {
+      // Manejo de errores específico para Axios
+      if (axios.isAxiosError(error)) {
+        const errorData = error.response?.data;
+        this.logger.error(
+          `Error de la API de WhatsApp al actualizar la plantilla ${templateId}`,
+          errorData,
+        );
+        // Propagamos el error de Meta al frontend para un feedback más claro
+        throw new HttpException(
+          errorData?.error?.error_user_msg ||
+            'Error al comunicarse con la API de WhatsApp.',
+          error.response?.status || HttpStatus.INTERNAL_SERVER_ERROR,
+        );
+      }
+
+      // Manejo de errores genéricos
+      this.logger.error(
+        `Error inesperado al actualizar la plantilla ${templateId}`,
+        error,
+      );
+      throw new HttpException(
+        'Ocurrió un error inesperado en el servidor.',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  async deleteTemplateByName(
+    businessId: string,
+    waba_id: string,
+    templateName: string,
+  ): Promise<{ success: boolean }> {
+    const apiUrl = `https://graph.facebook.com/v22.0/${waba_id}/message_templates`;
+    const whatsappToken = await this.getWhatsappToken(businessId);
+    this.logger.log(
+      `Intentando eliminar la plantilla: ${templateName} de WABA ID: ${businessId}`,
+    );
+
+    try {
+      const response = await axios.delete(apiUrl, {
+        headers: {
+          Authorization: `Bearer ${whatsappToken}`,
+        },
+        params: {
+          name: templateName,
+        },
+      });
+
+      this.logger.log(
+        `Plantilla "${templateName}" eliminada exitosamente. Respuesta: ${JSON.stringify(response.data)}`,
+      );
+      return response.data;
+    } catch (error) {
+      this.logger.error(
+        `Error al intentar eliminar la plantilla "${templateName}" en Meta.`,
+      );
+      this.throwMetaError(
+        error,
+        `Error al eliminar la plantilla "${templateName}" en Meta`,
+      );
+    }
+  }
+
+  async uploadMediaBufferToMeta(
+    business_id: string,
+    appId: string,
+    fileBuffer: Buffer,
+    fileType: string,
+  ): Promise<{ handle: string }> {
+    const whatsappToken = await this.getWhatsappToken(business_id);
+    const apiVersion = 'v20.0';
+
+    // --- PASO 1: Crear la Sesión de Subida ---
+    const createSessionUrl = `https://graph.facebook.com/${apiVersion}/${appId}/uploads`;
+    let uploadSessionId: string | undefined;
+
+    try {
+      this.logger.log(
+        `Paso 1: Creando sesión de subida para un archivo de tipo ${fileType}`,
+      );
+      const sessionResponse = await axios.post(createSessionUrl, null, {
+        params: {
+          file_length: fileBuffer.length,
+          file_type: fileType,
+          access_token: whatsappToken,
+          messaging_product: 'whatsapp',
+        },
+      });
+      uploadSessionId = sessionResponse.data.id;
+      this.logger.log(
+        `Paso 1 Exitoso. Session ID obtenido: ${uploadSessionId}`,
+      );
+    } catch (error) {
+      this.logger.error(`Error en el Paso 1 (Crear Sesión)`);
+      this.throwMetaError(
+        error,
+        'No se pudo iniciar la sesión de subida con Meta',
+      );
+      throw new HttpException(
+        'No se pudo iniciar la sesión de subida con Meta',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+
+    if (!uploadSessionId) {
+      this.logger.error('No se pudo obtener el uploadSessionId en el Paso 1.');
+      throw new HttpException(
+        'No se pudo obtener el uploadSessionId en el Paso 1.',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+
+    // --- PASO 2: Subir el Archivo a la Sesión ---
+    const uploadUrl = `https://graph.facebook.com/${apiVersion}/${uploadSessionId}`;
+    try {
+      this.logger.log(
+        `Paso 2: Subiendo ${fileBuffer.length} bytes a la sesión ${uploadSessionId}`,
+      );
+      const uploadResponse = await axios.post(uploadUrl, fileBuffer, {
+        headers: {
+          Authorization: `OAuth ${whatsappToken}`,
+          'Content-Type': fileType,
+          file_offset: 0,
+        },
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+      });
+
+      const fileHandle = uploadResponse.data.h;
+      if (!fileHandle) {
+        this.logger.error(
+          `Respuesta inesperada en el Paso 2: ${JSON.stringify(uploadResponse.data)}`,
+        );
+        throw new HttpException(
+          'La respuesta de Meta no contenía un handle de archivo.',
+          HttpStatus.INTERNAL_SERVER_ERROR,
+        );
+      }
+
+      this.logger.log(
+        `Paso 2 Exitoso. Handle de archivo obtenido: ${fileHandle}`,
+      );
+      return { handle: fileHandle };
+    } catch (error) {
+      this.logger.error(`Error en el Paso 2 (Subir Archivo)`);
+      this.throwMetaError(
+        error,
+        'No se pudo subir el archivo a la sesión de Meta',
+      );
+    }
+  }
+
+  public async getWhatsappToken(businessId: string): Promise<string> {
     const businessCredentials =
       await this.db.findBusinessByNumberId(businessId);
 
@@ -833,5 +1134,36 @@ export class WhatsappService {
     }
     const token = businessCredentials.whatsapp_token;
     return token ? token : '';
+  }
+
+  private throwMetaError(error: any, defaultMessage: string): never {
+    if (axios.isAxiosError(error)) {
+      const axiosError = error;
+      const errorMessage =
+        axiosError.response?.data?.error?.message || defaultMessage;
+      const errorStatus =
+        axiosError.response?.status || HttpStatus.INTERNAL_SERVER_ERROR;
+
+      this.logger.error(
+        `Error de la API de Meta [${errorStatus}]: ${errorMessage}`,
+      );
+      this.logger.debug(
+        `Respuesta completa del error: ${JSON.stringify(axiosError.response?.data)}`,
+      );
+
+      throw new HttpException(
+        {
+          message: `Error de la API de Meta: ${errorMessage}`,
+          metaError: axiosError.response?.data?.error,
+        },
+        errorStatus,
+      );
+    }
+
+    // Para cualquier otro tipo de error inesperado
+    this.logger.error(
+      `Error inesperado no relacionado con Axios: ${error.message}`,
+    );
+    throw new HttpException(defaultMessage, HttpStatus.INTERNAL_SERVER_ERROR);
   }
 }

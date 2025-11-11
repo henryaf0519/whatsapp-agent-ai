@@ -800,6 +800,7 @@ export class DynamoService {
     waba_id: string,
     whatsapp_token: string,
     number_id: string,
+    app_id: string,
   ): Promise<any> {
     const command = new PutCommand({
       TableName: 'login',
@@ -809,6 +810,7 @@ export class DynamoService {
         number_id: number_id,
         waba_id: waba_id,
         whatsapp_token: whatsapp_token,
+        app_id: app_id,
       },
     });
 
@@ -964,14 +966,9 @@ export class DynamoService {
     const dueSchedules = Items.filter((schedule) => {
       if (schedule.scheduleType === 'once' && schedule.sendAt) {
         // 1. Leemos la fecha UTC y la convertimos a un objeto Moment en la zona de Bogotá
-        const sendAtDate = new Date(schedule.sendAt);
-        return (
-          sendAtDate.getFullYear() === now.getFullYear() &&
-          sendAtDate.getMonth() === now.getMonth() &&
-          sendAtDate.getDate() === now.getDate() &&
-          sendAtDate.getHours() === now.getHours() &&
-          sendAtDate.getMinutes() === now.getMinutes()
-        );
+        const nowMomentUtc = moment.utc(now);
+        const sendAtMomentUtc = moment.utc(schedule.sendAt);
+        return sendAtMomentUtc.isSame(nowMomentUtc, 'minute');
       }
 
       if (schedule.scheduleType === 'recurring' && schedule.cronExpression) {
@@ -1087,5 +1084,198 @@ export class DynamoService {
       `Se encontraron ${response.Items?.length || 0} botones para la cuenta ${numberId}`,
     );
     return response.Items || [];
+  }
+
+  async saveClientFlowDefinition(
+    numberId: string,
+    flowId: string,
+    flowJson: string,
+    navigation: string,
+    description: string = 'Definición de flujo',
+  ): Promise<any> {
+    const item = {
+      number_id: numberId,
+      flow_id: flowId,
+      flow_definition: flowJson,
+      navigation: navigation,
+      description: description,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const command = new PutCommand({
+      TableName: 'ClientFlows',
+      Item: item,
+    });
+
+    try {
+      this.logger.log(`Guardando definición de flujo: ${numberId}/${flowId}`);
+      await this.docClient.send(command);
+      return { success: true, item };
+    } catch (error) {
+      this.logger.error(
+        `Error al guardar la definición del flujo ${numberId}/${flowId}`,
+        error,
+      );
+      throw new Error('Error al guardar la definición del flujo en DynamoDB');
+    }
+  }
+
+  async getClientFlowDefinition(
+    numberId: string,
+    flowId: string,
+  ): Promise<any> {
+    const command = new GetCommand({
+      TableName: 'ClientFlows',
+      Key: {
+        number_id: numberId,
+        flow_id: flowId,
+      },
+    });
+
+    try {
+      this.logger.debug(`Buscando definición de flujo: ${numberId}/${flowId}`);
+      const result = await this.docClient.send(command);
+
+      if (!result.Item) {
+        this.logger.error(
+          `No se encontró definición de flujo para ${numberId}/${flowId}`,
+        );
+        throw new Error('Definición de flujo no encontrada');
+      }
+
+      this.logger.debug(`Definición de flujo encontrada.`);
+      return result.Item; // Devuelve el ítem completo (incluye 'flow_definition')
+    } catch (error) {
+      this.logger.error(
+        `Error al obtener la definición del flujo ${numberId}/${flowId}`,
+        error,
+      );
+      throw new Error('Error al obtener la definición del flujo de DynamoDB');
+    }
+  }
+
+  async createFlowTrigger(
+    numberId: string,
+    triggerData: Record<string, any>,
+  ): Promise<any> {
+    const triggerId = uuidv4();
+    const item = {
+      number_id: numberId,
+      trigger_id: triggerId,
+      ...triggerData,
+      isActive:false
+    };
+
+    const command = new PutCommand({
+      TableName: 'FlowTriggers', // La nueva tabla que crearás
+      Item: item,
+    });
+
+    try {
+      await this.docClient.send(command);
+      this.logger.log(
+        `Disparador de Flow creado: ${triggerId} para ${numberId}`,
+      );
+      return item;
+    } catch (error) {
+      this.logger.error('Error al crear el disparador de Flow', error);
+      throw new Error('Error al crear el disparador de Flow');
+    }
+  }
+
+  /**
+   * Obtiene todos los disparadores de Flow para un negocio.
+   */
+  async getFlowTriggersForBusiness(numberId: string): Promise<any[] | null> {
+    const command = new QueryCommand({
+      TableName: 'FlowTriggers',
+      KeyConditionExpression: 'number_id = :numberId',
+      ExpressionAttributeValues: {
+        ':numberId': numberId,
+      },
+    });
+
+    try {
+      const response = await this.docClient.send(command);
+      this.logger.log(
+        `Obtenidos ${response.Items?.length || 0} disparadores para ${numberId}`,
+      );
+      this.logger.debug(JSON.stringify(response.Items));
+      if (!response.Items || (response.Items as any[]).length === 0) {
+        return null;
+      }
+      return response.Items as any[];
+    } catch (error) {
+      this.logger.error(
+        `Error obteniendo disparadores para ${numberId}`,
+        error,
+      );
+      return [];
+    }
+  }
+
+  /**
+   * Actualiza un disparador de Flow existente.
+   */
+  async updateFlowTrigger(
+    numberId: string,
+    triggerId: string,
+    updateData: Record<string, any>,
+  ): Promise<any> {
+    // Construir la expresión de actualización dinámicamente
+    const updateExpression: string[] = ['set updatedAt = :updatedAt'];
+    const expressionAttributeValues: Record<string, any> = {
+      ':updatedAt': new Date().toISOString(),
+    };
+    const expressionAttributeNames: Record<string, string> = {};
+
+    // Iteramos sobre el body, excluyendo las claves primarias
+    for (const [key, value] of Object.entries(updateData)) {
+      if (value !== undefined) {
+        const attrKey = `#${key}`;
+        const attrValue = `:${key}`;
+        updateExpression.push(`${attrKey} = ${attrValue}`);
+        expressionAttributeNames[attrKey] = key;
+        expressionAttributeValues[attrValue] = value;
+      }
+    }
+
+    // Si no hay nada que actualizar (aparte de updatedAt), evitamos un error
+    if (Object.keys(expressionAttributeNames).length === 0) {
+      // Solo actualizamos 'updatedAt'
+      const command = new UpdateCommand({
+        TableName: 'FlowTriggers',
+        Key: { number_id: numberId, trigger_id: triggerId },
+        UpdateExpression: 'set updatedAt = :updatedAt',
+        ExpressionAttributeValues: { ':updatedAt': new Date().toISOString() },
+        ReturnValues: 'ALL_NEW',
+      });
+      const response = await this.docClient.send(command);
+      return response.Attributes;
+    }
+
+    const command = new UpdateCommand({
+      TableName: 'FlowTriggers',
+      Key: {
+        number_id: numberId,
+        trigger_id: triggerId,
+      },
+      UpdateExpression: updateExpression.join(', '),
+      ExpressionAttributeNames: expressionAttributeNames,
+      ExpressionAttributeValues: expressionAttributeValues,
+      ReturnValues: 'ALL_NEW',
+    });
+
+    try {
+      const response = await this.docClient.send(command);
+      this.logger.log(`Disparador de Flow actualizado: ${triggerId}`);
+      return response.Attributes;
+    } catch (error) {
+      this.logger.error(
+        `Error al actualizar el disparador de Flow: ${triggerId}`,
+        error,
+      );
+      throw new Error('Error al actualizar el disparador');
+    }
   }
 }

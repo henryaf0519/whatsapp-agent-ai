@@ -1,6 +1,31 @@
-import { Controller, Post, Body, Res, Logger } from '@nestjs/common';
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+import {
+  Controller,
+  Post,
+  Body,
+  Res,
+  Logger,
+  Get,
+  Delete,
+  Param,
+  Put,
+  UseGuards,
+  Req,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
 import { Response, Request } from 'express';
 import { FlowService } from './flow.service';
+import { AuthGuard } from '@nestjs/passport'; // <--- AÑADIR
+
+// Definir el tipo para el usuario en el Request
+interface JwtUser {
+  userId: string;
+  email: string;
+  waba_id: string;
+  number_id: string;
+  app_id: string;
+}
 
 @Controller('flow')
 export class FlowController {
@@ -9,16 +34,11 @@ export class FlowController {
 
   @Post('webhook')
   async handleFlowWebhook(@Body() body: any, @Res() res: Response) {
-    this.logger.log(
-      'Petición de Flow recibida (modo de prueba, sin validación de firma)',
-    );
+    this.logger.log('Petición de Flow recibida webhook normal');
 
     try {
-      // Directamente procesamos los datos y obtenemos la respuesta cifrada
       const encryptedResponsePayload =
         await this.flowService.processFlowData(body);
-
-      // Enviamos la respuesta cifrada como texto plano
       res
         .status(200)
         .header('Content-Type', 'text/plain')
@@ -27,5 +47,141 @@ export class FlowController {
       this.logger.error('Error procesando el webhook del Flow', error);
       res.status(500).send('Error interno del servidor');
     }
+  }
+
+  @Post('webhookPro')
+  async handleFlowWebhookPro(@Body() body: any, @Res() res: Response) {
+    this.logger.log('Petición de Flow recibida webhookPro');
+
+    try {
+      const encryptedResponsePayload =
+        await this.flowService.processDynamicFlowData(body);
+      res
+        .status(200)
+        .header('Content-Type', 'text/plain')
+        .send(encryptedResponsePayload);
+    } catch (error) {
+      this.logger.error('Error procesando el webhook del Flow', error);
+      res.status(500).send('Error interno del servidor');
+    }
+  }
+
+  /*
+  ==========================================================================
+  NUEVOS ENDPOINTS CRUD PARA GESTIÓN DE FLOWS (ADMIN)
+  ==========================================================================
+  */
+
+  /**
+   * 1. Crear un nuevo Flow (vacío)
+   */
+  @Post()
+  @UseGuards(AuthGuard('jwt'))
+  @HttpCode(HttpStatus.CREATED)
+  async createFlow(
+    @Req() req: Request,
+    @Body('name') name: string,
+    @Body('categories') categories?: string[],
+  ) {
+    const { number_id, waba_id } = req.user as {
+      number_id: string;
+      waba_id: string;
+      app_id: string;
+    };
+    return this.flowService.createFlow(waba_id, number_id, name, categories);
+  }
+
+  /**
+   * 3. Obtener todos los Flows de la WABA
+   */
+  @Get()
+  @UseGuards(AuthGuard('jwt'))
+  async getFlows(@Req() req: Request) {
+    const { number_id, waba_id } = req.user as {
+      number_id: string;
+      waba_id: string;
+      app_id: string;
+    };
+    return this.flowService.getFlows(waba_id, number_id);
+  }
+
+  /**
+   * 2. Obtener un Flow específico por su ID
+   */
+  @Get(':flowId')
+  @UseGuards(AuthGuard('jwt'))
+  async getFlowById(@Param('flowId') flowId: string, @Req() req: Request) {
+    const user = req.user as JwtUser;
+    return this.flowService.getFlowById(flowId, user.number_id);
+  }
+
+  /**
+   * 4. Actualizar el contenido (JSON) de un Flow
+   * Espera un body como: { "flowJson": "{...}" }
+   */
+  @Put(':flowId/assets')
+  @UseGuards(AuthGuard('jwt'))
+  @HttpCode(HttpStatus.OK)
+  async updateFlowAssets(
+    @Param('flowId') flowId: string,
+    @Req() req: Request,
+    @Body('flowJson') flowJson: string,
+    @Body('navigationMap') navigation: string,
+  ) {
+    const user = req.user as JwtUser;
+    return this.flowService.updateFlowAssets(
+      flowId,
+      user.number_id,
+      flowJson,
+      navigation,
+    );
+  }
+
+  /**
+   * 5. Eliminar un Flow
+   */
+  @Delete(':flowId')
+  @UseGuards(AuthGuard('jwt'))
+  @HttpCode(HttpStatus.OK)
+  async deleteFlow(@Param('flowId') flowId: string, @Req() req: Request) {
+    const user = req.user as JwtUser;
+    return this.flowService.deleteFlow(flowId, user.number_id);
+  }
+
+  /**
+   * 6. Publicar un Flow
+   */
+
+  @Post('publish')
+  @UseGuards(AuthGuard('jwt'))
+  @HttpCode(HttpStatus.OK)
+  async publishFlow(
+    @Req() req: Request,
+    @Body('flowId') flowId: string,
+    @Body('name') name: string,
+  ) {
+    const user = req.user as JwtUser;
+
+    // Pasamos todos los parámetros al servicio
+    return this.flowService.publishFlow(flowId, name, user.number_id);
+  }
+
+  @Post(':internalFlowId/test')
+  @UseGuards(AuthGuard('jwt'))
+  async sendTestFlow(
+    @Req() req: Request,
+    @Body('flowId') flowId: string,
+    @Body('to') to: string,
+    @Body('screen') screen: string,
+    @Body('flowName') flowName: string,
+  ) {
+    const user = req.user as JwtUser;
+    return this.flowService.sendTestFlow(
+      flowId,
+      flowName,
+      to,
+      screen,
+      user.number_id,
+    );
   }
 }

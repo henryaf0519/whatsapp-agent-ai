@@ -10,6 +10,8 @@ import { CreateScheduleDto } from '../dto/create-schedule.dto';
 import { v4 as uuidv4 } from 'uuid';
 import axios from 'axios';
 import { SocketGateway } from 'src/socket/socket.gateway';
+import moment from 'moment-timezone';
+
 
 interface Contact {
   name: string;
@@ -45,9 +47,9 @@ export class BulkMessagingService {
     const scheduleId = uuidv4();
     let finalSendAt = dto.sendAt;
     if (dto.scheduleType === 'once' && dto.sendAt) {
-      const localDateString = dto.sendAt.replace('Z', '');
-      const localDate = new Date(localDateString);
-      finalSendAt = localDate.toISOString();
+      const localDate = moment.tz(dto.sendAt, 'America/Bogota');
+      finalSendAt = localDate.utc().toISOString();
+      this.logger.log(`Programado en Colombia a las ${dto.sendAt}, se guardará en BD como UTC: ${finalSendAt}`);
     }
     const schedule = {
       scheduleId,
@@ -125,6 +127,7 @@ export class BulkMessagingService {
 
   @Cron(CronExpression.EVERY_MINUTE)
   async handleCron() {
+    this.logger.debug('Ejecutando tarea programada para enviar mensajes masivos');
     const now = new Date();
     const schedules: TemplateSchedule[] =
       await this.dynamoService.getDueSchedules(now);

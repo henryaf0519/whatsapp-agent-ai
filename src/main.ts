@@ -5,6 +5,7 @@
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+import { json, urlencoded } from 'express';
 import 'reflect-metadata';
 import cookieParser from 'cookie-parser';
 import { ValidationPipe } from '@nestjs/common';
@@ -19,6 +20,8 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     rawBody: true,
   });
+  app.use(json({ limit: '50mb' }));
+  app.use(urlencoded({ extended: true, limit: '50mb' }));
 
   app.enableCors({
     origin: (origin, callback) => {

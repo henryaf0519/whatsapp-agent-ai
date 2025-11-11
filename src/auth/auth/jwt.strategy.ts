@@ -22,12 +22,14 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     username: string;
     waba_id: string;
     number_id: string;
+    app_id: string;
   }) {
     return {
       userId: payload.sub,
       email: payload.username,
       waba_id: payload.waba_id,
       number_id: payload.number_id,
+      app_id: payload.app_id,
     };
   }
 }
