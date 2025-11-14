@@ -1,63 +1,131 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
+// En: henryaf0519/whatsapp-agent-ai/whatsapp-agent-ai-dev/src/calendar/calendar.service.ts
+
 import {
   Injectable,
   InternalServerErrorException,
   Logger,
+  NotFoundException, // <-- Importar NotFoundException
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import { OAuth2Client } from 'google-auth-library';
+import { DynamoService } from 'src/database/dynamo/dynamo.service'; // <-- NUEVO: Importar DynamoService
+
 @Injectable()
 export class CalendarService {
-  private readonly calendarId: string;
-  private readonly oauth2Client: OAuth2Client;
+  // private readonly calendarId: string; // <-- ELIMINADO: Ya no se usa
   private readonly baseUrl = 'https://www.googleapis.com/calendar/v3';
   private readonly logger = new Logger(CalendarService.name);
+  private readonly clientId: string;
+  private readonly clientSecret: string;
+  private readonly redirectUri: string;
 
-  constructor(private readonly config: ConfigService) {
-    const clientId = this.config.get<string>('GMAIL_CLIENT_ID');
-    const clientSecret = this.config.get<string>('GMAIL_CLIENT_SECRET');
-    const refreshToken = this.config.get<string>('GMAIL_REFRESH_TOKEN');
-    const redirectUri = this.config.get<string>('GMAIL_REDIRECT_URI');
-    this.calendarId = this.config.get<string>('GOOGLE_CALENDAR_ID', 'primary');
+  constructor(
+    private readonly config: ConfigService,
+    private readonly dynamoService: DynamoService, // <-- Inyectar DynamoService
+  ) {
+    this.clientId = this.config.get<string>('GMAIL_CLIENT_ID')!;
+    this.clientSecret = this.config.get<string>('GMAIL_CLIENT_SECRET')!;
+    this.redirectUri = this.config.get<string>('GMAIL_REDIRECT_URI')!;
 
-    if (!clientId || !clientSecret || !refreshToken || !redirectUri) {
-      throw new Error('Faltan credenciales OAuth2 de Gmail');
+    if (!this.clientId || !this.clientSecret || !this.redirectUri) {
+      throw new Error(
+        'Faltan credenciales OAuth2 de Google (ID, Secret o Redirect URI)',
+      );
     }
-
-    this.oauth2Client = new OAuth2Client(clientId, clientSecret, redirectUri);
-    this.oauth2Client.setCredentials({ refresh_token: refreshToken });
   }
 
+  /**
+   * Método privado para crear un cliente OAuth2 específico para un usuario.
+   * Utiliza el refresh_token guardado en DynamoDB.
+   */
+  private async createClientForUser(
+    numberId: string,
+  ): Promise<{ client: OAuth2Client; email: string }> {
+    // <-- Devuelve client y email
+    this.logger.log(
+      `Buscando credenciales de Google para numberId: ${numberId}`,
+    );
+
+    const businessCredentials =
+      await this.dynamoService.findBusinessByNumberId(numberId);
+
+    if (!businessCredentials) {
+      throw new NotFoundException(
+        `No se encontraron credenciales para el businessId: ${numberId}`,
+      );
+    }
+
+    const refreshToken = businessCredentials.google_refresh_token;
+    const userEmail = businessCredentials.email; // Para logs y retorno
+
+    if (!refreshToken) {
+      this.logger.warn(
+        `El cliente ${userEmail} (numberId: ${numberId}) no ha conectado su Google Calendar.`,
+      );
+      throw new InternalServerErrorException(
+        'El cliente no ha conectado su cuenta de Google Calendar.',
+      );
+    }
+
+    const client = new OAuth2Client(
+      this.clientId,
+      this.clientSecret,
+      this.redirectUri,
+    );
+
+    client.setCredentials({ refresh_token: refreshToken });
+    return { client, email: userEmail }; // <-- Devuelve ambos
+  }
+
+  /**
+   * MODIFICADO: Ahora 'createEvent' requiere el 'numberId' del cliente
+   * para saber en qué calendario crear el evento.
+   */
   async createEvent(
+    numberId: string, // <-- PARÁMETRO REQUERIDO: El ID del cliente (para buscar su token)
     date: string,
     time: string,
     title: string,
     durationMinutes = 60,
     guestEmails: string[] = [],
   ): Promise<unknown> {
-    const res = await this.oauth2Client.getAccessToken();
+    this.logger.log(
+      `Solicitud para crear evento en calendario del cliente: ${numberId}`,
+    );
+    const { client, email } = await this.createClientForUser(numberId);
+    const res = await client.getAccessToken();
     const token = res.token;
+
     if (!token) {
-      this.logger.error('No se pudo obtener access token');
+      this.logger.error(`No se pudo obtener access token para ${numberId}`);
       throw new InternalServerErrorException('Error obteniendo access token');
     }
-    const start = new Date(`${date}T${time}:00-05:00`);
+
+    const start = new Date(`${date}T${time}-05:00`);
+
     const end = new Date(start.getTime() + durationMinutes * 60000);
+
     const body: {
       summary: string;
-      start: { dateTime: string };
-      end: { dateTime: string };
+      start: { dateTime: string; timeZone: string };
+      end: { dateTime: string; timeZone: string };
       attendees?: { email: string }[];
     } = {
       summary: title,
-      start: { dateTime: start.toISOString() },
-      end: { dateTime: end.toISOString() },
+      start: { dateTime: start.toISOString(), timeZone: 'America/Bogota' },
+      end: { dateTime: end.toISOString(), timeZone: 'America/Bogota' },
     };
+
     if (guestEmails.length) {
       body.attendees = guestEmails.map((email) => ({ email }));
     }
 
-    const url = `${this.baseUrl}/calendars/${this.calendarId}/events?sendUpdates=all`;
+    const calendarId = email;
+    const url = `${this.baseUrl}/calendars/${calendarId}/events?sendUpdates=all`;
+
     try {
       const { data } = await axios.post(url, body, {
         headers: {
@@ -65,20 +133,26 @@ export class CalendarService {
           'Content-Type': 'application/json',
         },
       });
-      this.logger.log(`Evento creado`);
+      this.logger.log(
+        `Evento creado exitosamente en el calendario de ${numberId}`,
+      );
       return data;
     } catch (err) {
       if (axios.isAxiosError(err)) {
         this.logger.error(
-          `Google Calendar API error ${err.response?.status}`,
+          `Google Calendar API error ${err.response?.status} para ${numberId}`,
           JSON.stringify(err.response?.data),
         );
         throw new InternalServerErrorException(
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-          `No se pudo crear evento (${err.response?.status}): ${err.response?.data?.error?.message || err.message}`,
+          `No se pudo crear evento (${err.response?.status}): ${
+            (err.response?.data as any)?.error?.message || err.message
+          }`,
         );
       }
-      this.logger.error('Error inesperado creando evento', err);
+      this.logger.error(
+        `Error inesperado creando evento para ${numberId}`,
+        err,
+      );
       throw new InternalServerErrorException('Error inesperado creando evento');
     }
   }

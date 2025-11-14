@@ -1278,4 +1278,50 @@ export class DynamoService {
       throw new Error('Error al actualizar el disparador');
     }
   }
+
+  /**
+   * Actualiza el registro de un usuario en la tabla 'login' para
+   * almacenar su Google Refresh Token y marcar la autenticación como completada.
+   * @param email El PK del usuario (email).
+   * @param refreshToken El token a guardar.
+   */
+  async updateUserGoogleRefreshToken(
+    email: string,
+    refreshToken: string,
+  ): Promise<any> {
+    const command = new UpdateCommand({
+      TableName: 'login',
+      Key: {
+        email: email,
+      },
+      UpdateExpression:
+        'SET google_refresh_token = :token, hasGoogleAuth = :bool, updatedAt = :updatedAt',
+      ExpressionAttributeValues: {
+        ':token': refreshToken,
+        ':bool': true,
+        ':updatedAt': new Date().toISOString(),
+      },
+      ReturnValues: 'UPDATED_NEW',
+    });
+
+    try {
+      this.logger.log(
+        `Actualizando Google Refresh Token para el usuario: ${email}`,
+      );
+      const response = await this.docClient.send(command);
+      this.logger.log(
+        `Token guardado exitosamente para: ${email}`,
+        response.Attributes,
+      );
+      return response.Attributes;
+    } catch (error) {
+      this.logger.error(
+        `Error al guardar el refresh token para ${email}`,
+        error,
+      );
+      throw new Error(
+        'Error al actualizar el token del usuario en la base de datos.',
+      );
+    }
+  }
 }
