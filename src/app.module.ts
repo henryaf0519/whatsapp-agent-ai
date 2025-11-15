@@ -4,7 +4,6 @@ import { AppService } from './app.service';
 import { WhatsappWebhookController } from './whatsapp-webhook/whatsapp-webhook.controller';
 import { ConfigModule } from '@nestjs/config';
 import { EmailService } from './email/email.service';
-import { CalendarService } from './calendar/calendar.service';
 import { EmailController } from './email/email.controller';
 import { PruebaService } from './agent/agent.service';
 import { AgentOpenIaService } from './agent/agent-open-ia/agent-open-ia.service';
@@ -20,6 +19,7 @@ import { BulkMessagingModule } from './bulk-messaging/bulk-messaging.module';
 import { FlowModule } from './flow/flow.module';
 import { SocketModule } from './socket/socket.module';
 import { WhatsappTemplatesModule } from './whatsapp-templates/whatsapp-templates.module';
+import { CalendarModule } from './calendar/calendar.module';
 
 @Module({
   imports: [
@@ -37,6 +37,7 @@ import { WhatsappTemplatesModule } from './whatsapp-templates/whatsapp-templates
     FlowModule,
     SocketModule,
     WhatsappTemplatesModule,
+    CalendarModule,
   ],
   controllers: [
     AppController,
@@ -47,7 +48,6 @@ import { WhatsappTemplatesModule } from './whatsapp-templates/whatsapp-templates
   providers: [
     AppService,
     EmailService,
-    CalendarService,
     PruebaService,
     AgentOpenIaService,
     SemanticCacheService,
