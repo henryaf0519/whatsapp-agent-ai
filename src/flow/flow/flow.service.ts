@@ -588,6 +588,7 @@ Pago de pensión por $290,000 COP\n`,
           await this._executeFlowCompletionLogic(
             newSessionData,
             flowNavigate,
+            flowJson,
             numberId,
             userNumber,
           );
@@ -634,6 +635,7 @@ Pago de pensión por $290,000 COP\n`,
         await this._executeFlowCompletionLogic(
           newSessionData,
           flowNavigate,
+          flowJson,
           numberId,
           userNumber,
         );
@@ -715,39 +717,85 @@ Pago de pensión por $290,000 COP\n`,
       throw new Error('Error al parsear la definición del flujo.');
     }
   }
-
   /**
-   * Construye un string de detalles 100% dinámico basado en los datos de la sesión.
-   * No asume nombres de campos como 'nombre' o 'email'.
+   * Construye un resumen (detalles) profesional iterando sobre el flow.json
+   * para encontrar solo los campos de formulario y sus labels/names.
    */
   private _buildDynamicDetails(
-    sessionData: any,
+    newSessionData: any,
     flowNavigate: any,
+    flowJson: any,
     title?: string,
   ): string {
     const details: string[] = [];
 
     if (title) {
       details.push(title);
-      details.push('-----------------');
     } else {
-      details.push('✅ Este es el resumen de tu flujo:');
+      details.push('✅ Resumen de tu solicitud:');
     }
 
-    for (const key in sessionData) {
-      // key será "menu" o "selection"
-      if (Object.prototype.hasOwnProperty.call(sessionData, key)) {
-        const optionId = sessionData[key];
-
-        // --- 2. ¡AQUÍ ESTÁ LA TRADUCCIÓN! ---
-        const navInfo = flowNavigate[optionId];
-        const readableValue = navInfo ? navInfo.valor : optionId;
-        // ------------------------------------
-
-        // Capitalizar la primera letra de la clave
-        const formattedKey = key.charAt(0).toUpperCase() + key.slice(1);
-        details.push(`${formattedKey}: ${readableValue || 'No especificado'}`);
+    const processedFields = new Set<string>();
+    for (const screen of flowJson.screens) {
+      const form = screen.layout?.children?.find(
+        (child: any) => child.type === 'Form',
+      );
+      if (!form || !form.children) {
+        continue; 
       }
+
+      for (const field of form.children) {
+        const fieldName = field.name;
+        const fieldType = field.type;
+        if (!fieldName || processedFields.has(fieldName)) {
+          continue;
+        }
+        const value = newSessionData[fieldName];
+        if (!value) {
+          continue;
+        }
+
+        let formattedKey = '';
+
+        if (fieldName === 'date') {
+          formattedKey = 'Cita seleccionada';
+        } else if (
+          fieldType === 'RadioButtonsGroup' ||
+          (fieldType === 'Dropdown' && fieldName !== 'date')
+        ) {
+          formattedKey = 'Seleccionaste';
+        } else if (field.label) {
+          formattedKey = field.label.replace(':', '');
+        } else {
+          formattedKey = fieldName
+            .replace(/_/g, ' ')
+            .replace(/\b\w/g, (char) => char.toUpperCase());
+        }
+        let readableValue = String(value);
+        if (
+          readableValue.startsWith('opcion_') ||
+          readableValue.startsWith('cat_opt_')
+        ) {
+          if (
+            flowNavigate[readableValue] &&
+            flowNavigate[readableValue].valor
+          ) {
+            readableValue = flowNavigate[readableValue].valor;
+          } else {
+            continue;
+          }
+        }
+
+        details.push(`${formattedKey}: ${readableValue}`);
+        processedFields.add(fieldName);
+      }
+    }
+
+    if (processedFields.size === 0) {
+      details.push(
+        'Tu solicitud ha sido registrada.',
+        'Un agente se comunicará contigo.',
+      );
     }
 
     return details.join('\n');
@@ -1400,6 +1448,7 @@ Pago de pensión por $290,000 COP\n`,
   private async _executeFlowCompletionLogic(
     newSessionData: any,
     flowNavigate: any,
+    flowJson: any,
     numberId: string,
     userNumber: string,
   ): Promise<void> {
@@ -1413,7 +1462,11 @@ Pago de pensión por $290,000 COP\n`,
       );
 
       // 2. Guardar el resumen final en la base de datos y notificar al socket
-      const details = this._buildDynamicDetails(newSessionData, flowNavigate);
+      const details = this._buildDynamicDetails(
+        newSessionData,
+        flowNavigate,
+        flowJson,
+      );
       await this.saveMessage(numberId, userNumber, details);
       this.logger.log(
         `[DYN] Resumen generado y guardado: ${JSON.stringify(details)}`,
@@ -1603,7 +1656,11 @@ Pago de pensión por $290,000 COP\n`,
       this.logger.log(
         `[DYN] Generando datos 'details' para MOSTRAR en la pantalla ${nextScreenId}`,
       );
-      const details = this._buildDynamicDetails(newSessionData, flowNavigate);
+      const details = this._buildDynamicDetails(
+        newSessionData,
+        flowNavigate,
+        flowJson,
+      );
       detailsData = { details: details };
       this.logger.log(
         `[DYN] 'details' generados para mostrar: ${JSON.stringify(details)}`,
