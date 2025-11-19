@@ -20,6 +20,7 @@ import { FlowModule } from './flow/flow.module';
 import { SocketModule } from './socket/socket.module';
 import { WhatsappTemplatesModule } from './whatsapp-templates/whatsapp-templates.module';
 import { CalendarModule } from './calendar/calendar.module';
+import { CrmModule } from './crm/crm.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { CalendarModule } from './calendar/calendar.module';
     SocketModule,
     WhatsappTemplatesModule,
     CalendarModule,
+    CrmModule,
   ],
   controllers: [
     AppController,

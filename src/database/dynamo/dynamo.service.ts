@@ -1407,4 +1407,71 @@ export class DynamoService {
       return new Set<string>(); // Devolver vacío en caso de error
     }
   }
+
+  /**
+   * Guarda la configuración de etapas del CRM para una empresa.
+   * Se almacena en una tabla de configuraciones (ej. CRMSettings o reutilizando una existente con SK específico).
+   */
+  async saveCrmStages(numberId: string, stages: any[]): Promise<any> {
+    const item = {
+      number_id: numberId, // Partition Key
+      stages: stages,
+      updatedAt: new Date().toISOString(),
+    };
+
+    // Usamos una tabla dedicada o una genérica. Sugiero 'CRMSettings'
+    const command = new PutCommand({
+      TableName: 'CRMSettings',
+      Item: item,
+    });
+
+    try {
+      await this.docClient.send(command);
+      this.logger.log(`Configuración de etapas guardada para ${numberId}`);
+      return item;
+    } catch (error) {
+      this.logger.error('Error al guardar etapas del CRM', error);
+      throw new Error('No se pudo guardar la configuración de etapas.');
+    }
+  }
+
+  /**
+   * Obtiene la configuración de etapas del CRM.
+   */
+  async getCrmStages(numberId: string): Promise<any[]> {
+    const command = new GetCommand({
+      TableName: 'CRMSettings',
+      Key: {
+        number_id: numberId,
+      },
+    });
+
+    try {
+      const result = await this.docClient.send(command);
+      if (result.Item && result.Item.stages) {
+        return result.Item.stages;
+      }
+      // Retornar etapas por defecto si no hay configuración previa
+      return [
+        { id: 'Nuevo', name: 'Nuevo Lead', color: '#3B82F6', isSystem: true },
+        {
+          id: 'Contactado',
+          name: 'Contactado',
+          color: '#6366F1',
+          isSystem: false,
+        },
+        {
+          id: 'Propuesta',
+          name: 'Propuesta',
+          color: '#A855F7',
+          isSystem: false,
+        },
+        { id: 'Vendido', name: 'Vendido', color: '#22C55E', isSystem: false },
+        { id: 'Perdido', name: 'Perdido', color: '#6B7280', isSystem: false },
+      ];
+    } catch (error) {
+      this.logger.error('Error al obtener etapas del CRM', error);
+      return [];
+    }
+  }
 }
