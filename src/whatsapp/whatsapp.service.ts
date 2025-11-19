@@ -555,35 +555,49 @@ export class WhatsappService {
     to: string,
     name: string,
     businessId: string,
+    specificTrigger?: any, // Trigger específico del botón (opcional)
   ): Promise<WhatsAppApiResponse> {
     try {
-      // 1. Obtener el token de WhatsApp
       const whatsappToken = await this.getWhatsappToken(businessId);
+      let trigger: any;
 
-      // 2. Buscar todos los triggers para ese negocio
-      let trigger: any = await this.db.getFlowTriggersForBusiness(businessId);
-      trigger = trigger[0];
-      this.logger.debug(`Todos los triggers: ${JSON.stringify(trigger)}`);
-
-      // 4. Validar que el trigger exista
-      if (!trigger) {
-        this.logger.error(
-          `No se encontró un FlowTrigger ACTIVO con el nombre: "${trigger}" para el businessId: ${businessId}`,
+      // 1. SELECCIÓN DEL TRIGGER
+      if (specificTrigger) {
+        // A. Flujo por Botón (Prioridad)
+        trigger = specificTrigger;
+        this.logger.log(
+          `[Flow] Usando trigger ESPECÍFICO (Botón): ${trigger.name}`,
         );
-        throw new HttpException(
-          `Flow trigger "${trigger}" no encontrado o no está activo.`,
-          HttpStatus.NOT_FOUND,
+      } else {
+        // B. Flujo por Defecto (Fallback) -> Busca el ACTIVO
+        this.logger.log(
+          `[Flow] No hay trigger específico. Buscando Flow Default ACTIVO...`,
         );
+        trigger = await this.db.getDefaultFlowTrigger(businessId);
       }
 
-      // 5. Construir el token y el payload dinámicamente
+      // 2. VALIDACIÓN
+      if (!trigger || !trigger.flow_id) {
+        // Nota: Ya no validamos 'isActive' aquí dentro porque getDefaultFlowTrigger
+        // ya filtra por active, y specificTrigger se supone que ya viene validado o es intencional.
+        const msg = `No se encontró ningún FlowTrigger válido (Específico o Default Activo) para ${businessId}`;
+        this.logger.error(msg);
+        throw new HttpException(msg, HttpStatus.NOT_FOUND);
+      }
+
+      // Si llegamos aquí, tenemos un trigger.
+      this.logger.log(
+        `[Flow] Trigger seleccionado: "${trigger.name}" (ID: ${trigger.flow_id})`,
+      );
+
+      // 3. CONSTRUCCIÓN DEL TOKEN
       const flowToken = `token_${to}_${businessId}_${trigger.flow_id}_${Date.now()}`;
 
       const headerText = trigger.header_text
         ? trigger.header_text.replace(/nombre/gi, name)
         : '';
 
-      // Construcción dinámica del payload basado en el trigger
+      // 4. PAYLOAD
       const payload = {
         messaging_product: 'whatsapp',
         to: to,
@@ -600,22 +614,19 @@ export class WhatsappService {
               trigger.body_text ||
               'Por favor, interactúa con el siguiente flujo.',
           },
-
           footer: {
             text: trigger.footer_text ?? '',
           },
-
           action: {
             name: 'flow',
             parameters: {
               flow_message_version: '3',
-              flow_id: trigger.flow_id, // Dinámico
-              flow_token: flowToken, // Dinámico
-              flow_cta: trigger.flow_cta, // Dinámico
+              flow_id: trigger.flow_id,
+              flow_token: flowToken,
+              flow_cta: trigger.flow_cta,
               flow_action: 'navigate',
               flow_action_payload: {
-                screen: trigger.screen_id, // Dinámico
-                // Añadir datos iniciales solo si existen y no están vacíos
+                screen: trigger.screen_id,
                 ...(trigger.initial_data &&
                   Object.keys(trigger.initial_data).length > 0 && {
                     data: trigger.initial_data,
@@ -626,12 +637,8 @@ export class WhatsappService {
         },
       };
 
-      this.logger.log(
-        `Enviando mensaje de FLUJO DINÁMICO a: ${to} (Trigger: ${trigger.name})`,
-      );
+      // 5. ENVÍO
       const apiUrl = `https://graph.facebook.com/v23.0/${businessId}/messages`;
-
-      // 6. Realizar la llamada a la API (sin bucle de reintentos)
       const response: AxiosResponse<WhatsAppApiResponse> = await axios.post(
         apiUrl,
         payload,
@@ -646,24 +653,14 @@ export class WhatsappService {
 
       return response.data;
     } catch (error) {
-      // Re-throw HttpExceptions (como nuestro 404 de "trigger no encontrado")
-      if (error instanceof HttpException) {
-        throw error;
-      }
+      if (error instanceof HttpException) throw error;
+      if (axios.isAxiosError(error)) this.handleAxiosError(error, 1);
 
-      // Lanzar errores de Axios usando el helper existente
-      if (axios.isAxiosError(error)) {
-        // Usamos 1 como número de intento, ya que no hay reintentos
-        this.handleAxiosError(error, 1);
-      }
-
-      // Manejar otros errores inesperados
       this.logger.error(
-        `Error inesperado en sendFlowMessage: ${error instanceof Error ? error.message : String(error)}`,
-        error instanceof Error ? error.stack : undefined,
+        `Error en sendFlowMessage: ${error instanceof Error ? error.message : String(error)}`,
       );
       throw new HttpException(
-        'Error interno del servidor al procesar el flujo',
+        'Error interno enviando el flujo.',
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

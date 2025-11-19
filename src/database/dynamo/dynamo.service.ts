@@ -1508,4 +1508,62 @@ export class DynamoService {
       return [];
     }
   }
+  /**
+   * Busca un disparador de Flow activo que coincida con el payload del botón.
+   */
+  async getFlowTriggerByPayload(
+    numberId: string,
+    triggerName: string,
+  ): Promise<any | null> {
+    const command = new QueryCommand({
+      TableName: 'FlowTriggers',
+      KeyConditionExpression: 'number_id = :numberId',
+      FilterExpression: '#name = :triggerName AND isActive = :active',
+      ExpressionAttributeNames: {
+        '#name': 'name', // 'name' es palabra reservada en DynamoDB
+      },
+      ExpressionAttributeValues: {
+        ':numberId': numberId,
+        ':triggerName': triggerName,
+        ':active': true,
+      },
+      Limit: 1,
+    });
+
+    try {
+      const response = await this.docClient.send(command);
+      return response.Items?.[0] ?? null;
+    } catch (error) {
+      this.logger.error(
+        `Error buscando FlowTrigger para payload: ${triggerName}`,
+        error,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Obtiene el Flow por Defecto (el único que debe estar activo si no es por botón).
+   * Filtra por number_id y isActive = true.
+   */
+  async getDefaultFlowTrigger(numberId: string): Promise<any | null> {
+    const command = new QueryCommand({
+      TableName: 'FlowTriggers',
+      KeyConditionExpression: 'number_id = :numberId',
+      FilterExpression: 'isActive = :active',
+      ExpressionAttributeValues: {
+        ':numberId': numberId,
+        ':active': true,
+      },
+    });
+
+    try {
+      this.logger.log(`Buscando Flow Default (Activo) para ${numberId}`);
+      const response = await this.docClient.send(command);
+      return response.Items?.[0] ?? null;
+    } catch (error) {
+      this.logger.error(`Error buscando Flow Default para ${numberId}`, error);
+      return null;
+    }
+  }
 }
