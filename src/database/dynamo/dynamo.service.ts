@@ -1474,4 +1474,38 @@ export class DynamoService {
       return [];
     }
   }
+  /**
+   * Obtiene contactos por businessId y stage de la tabla ChatControl.
+   */
+  async getContactsByStage(businessId: string, stage: string): Promise<any[]> {
+    const command = new QueryCommand({
+      TableName: 'ChatControl',
+      KeyConditionExpression: 'businessId = :businessId',
+      FilterExpression: '#stage = :stageValue',
+      ExpressionAttributeNames: {
+        '#stage': 'stage',
+      },
+      ExpressionAttributeValues: {
+        ':businessId': businessId,
+        ':stageValue': stage,
+      },
+    });
+
+    try {
+      this.logger.log(
+        `Fetching contacts for business ${businessId} in stage: ${stage}`,
+      );
+      const { Items } = await this.docClient.send(command);
+      this.logger.log(
+        `Found ${Items?.length || 0} contacts in stage ${stage} for business ${businessId}`,
+      );
+      return Items || [];
+    } catch (error) {
+      this.logger.error(
+        `Error fetching contacts by stage for ${businessId}/${stage}`,
+        error,
+      );
+      return [];
+    }
+  }
 }

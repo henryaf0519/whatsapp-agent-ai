@@ -891,9 +891,6 @@ export class WhatsappService {
       });
 
       if (response.data && response.data.id) {
-        this.logger.log(
-          `Archivo multimedia subido exitosamente. Media ID: ${response.data.id}`,
-        );
         return response.data.id;
       } else {
         throw new Error(
@@ -917,13 +914,6 @@ export class WhatsappService {
     const whatsappToken = await this.getWhatsappToken(business_id);
     const apiUrl = `https://graph.facebook.com/v22.0/${wabaId}/message_templates`;
 
-    this.logger.log(
-      `Enviando solicitud para crear plantilla: ${templateData.name}`,
-    );
-    this.logger.debug(
-      `Payload final de la plantilla: ${JSON.stringify(templateData, null, 2)}`,
-    );
-
     try {
       const response = await axios.post(apiUrl, templateData, {
         headers: {
@@ -931,7 +921,6 @@ export class WhatsappService {
           'Content-Type': 'application/json',
         },
       });
-      this.logger.log(`Plantilla "${templateData.name}" creada exitosamente.`);
       return response.data;
     } catch (error) {
       this.logger.error('Error al intentar crear la plantilla en Meta.');
@@ -951,11 +940,6 @@ export class WhatsappService {
     const payload = {
       components: updateTemplateDto.components,
     };
-
-    this.logger.log(`Intentando actualizar la plantilla con ID: ${templateId}`);
-    this.logger.debug(`URL de la petición: ${url}`);
-    this.logger.debug(`Payload enviado: ${JSON.stringify(payload)}`);
-
     try {
       const response = await axios.post(url, payload, {
         headers: {
