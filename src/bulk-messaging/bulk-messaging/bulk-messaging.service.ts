@@ -127,7 +127,6 @@ export class BulkMessagingService {
 
   @Cron(CronExpression.EVERY_MINUTE)
   async handleCron() {
-    this.logger.debug('Ejecutando tarea programada para enviar mensajes masivos');
     const now = new Date();
     const schedules: TemplateSchedule[] =
       await this.dynamoService.getDueSchedules(now);

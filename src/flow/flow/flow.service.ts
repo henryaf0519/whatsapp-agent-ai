@@ -22,6 +22,7 @@ import { WhatsappService } from 'src/whatsapp/whatsapp.service';
 import FormData from 'form-data';
 import moment from 'moment';
 import { CalendarService } from 'src/calendar/calendar.service';
+import { Cron, CronExpression } from '@nestjs/schedule';
 
 const WELCOME_OPTIONS = [
   { id: 'ABOUT_US', title: 'Quienes Somos' },
@@ -555,10 +556,12 @@ Pago de pensión por $290,000 COP\n`,
       throw new Error('Estructura de JSON de flujo inválida');
     }
 
-    // 3. Obtener y fusionar datos de sesión
-    const currentSessionData = this.flowSessions[flow_token] || {};
+    const currentSessionData = this.flowSessions[flow_token]?.data || {};
     const newSessionData = { ...currentSessionData, ...data };
-    this.flowSessions[flow_token] = newSessionData; // Guardar estado actualizado
+    this.flowSessions[flow_token] = {
+      timestamp: Date.now(),
+      data: newSessionData,
+    };
 
     let responseData: any;
 
@@ -566,7 +569,7 @@ Pago de pensión por $290,000 COP\n`,
     switch (action) {
       case 'INIT': {
         this.logger.log(`[DYN] Acción INIT para ${flow_id}`);
-        this.flowSessions[flow_token] = {}; // Limpiamos sesión anterior
+        this.flowSessions[flow_token] = { timestamp: Date.now(), data: {} };
         const startScreenId = Object.keys(flowJson.routing_model)[0];
 
         responseData = {
@@ -591,6 +594,7 @@ Pago de pensión por $290,000 COP\n`,
             flowJson,
             numberId,
             userNumber,
+            flow_token,
           );
 
           // Responde a Meta para cerrar el flow
@@ -638,6 +642,7 @@ Pago de pensión por $290,000 COP\n`,
           flowJson,
           numberId,
           userNumber,
+          flow_token,
         );
         delete this.flowSessions[flow_token]; // Limpiar la sesión
 
@@ -741,7 +746,7 @@ Pago de pensión por $290,000 COP\n`,
         (child: any) => child.type === 'Form',
       );
       if (!form || !form.children) {
-        continue; 
+        continue;
       }
 
       for (const field of form.children) {
@@ -1298,17 +1303,17 @@ Pago de pensión por $290,000 COP\n`,
    * Maneja la lógica de los dataSourceTriggers del __SCREEN_CONFIG__
    * Esta función actúa como un enrutador para llamar a la lógica correcta.
    */
-  private _handleDataSourceTrigger(
+  private async _handleDataSourceTrigger(
     trigger: string,
     config: any,
     numberId: string,
     data: any,
-  ): Record<string, any> {
+  ): Promise<Record<string, any>> {
     this.logger.log(`[DYN] Ejecutando dataSourceTrigger: ${trigger}`);
 
     switch (trigger) {
       case 'fetch_available_dates':
-        const dates = this._generateAvailableDates(config);
+        const dates = await this._generateAvailableDates(config, numberId);
         return { date: dates };
       default:
         this.logger.warn(`[DYN] dataSourceTrigger no reconocido: ${trigger}`);
@@ -1316,52 +1321,58 @@ Pago de pensión por $290,000 COP\n`,
     }
   }
 
-  // En: src/flow/flow/flow.service.ts
-  // (Asegúrate de que 'moment' esté importado al inicio del archivo: import moment from 'moment-timezone';)
-
   /**
    * Genera una lista de SLOTS DE CITA (fecha y hora) disponibles
-   * basada en la configuración estática del flowNavigate.
-   *
-   * Esta función es llamada por el dataSourceTrigger: "fetch_available_dates"
-   * y genera la lista completa de slots (fecha + hora).
+   * 1. Genera slots estáticos (días, horas, breaks)
+   * 2. Consulta DynamoDB por slots ya ocupados
+   * 3. Filtra la lista estática y devuelve solo los slots libres.
    */
-  private _generateAvailableDates(
+  private async _generateAvailableDates(
     config: any,
-  ): { id: string; title: string }[] {
+    numberId: string, // <-- AÑADIDO: Necesitamos saber para qué cliente buscar
+  ): Promise<{ id: string; title: string }[]> {
     const {
       daysToShow,
-      daysAvailable, // [1, 3, 4, 5] (L, M, J, V)
-      startTime, // "08:00"
-      endTime, // "17:00"
-      intervalMinutes, // 60
-      breakTimes, // [{ start: "12:00", end: "13:00" }]
+      daysAvailable,
+      startTime,
+      endTime,
+      intervalMinutes,
+      breakTimes,
     } = config;
 
     const availableSlots: { id: string; title: string }[] = [];
-    const timeZone = 'America/Bogota'; // Asumimos esta zona horaria
-    const now = moment.tz(timeZone);
+    const timeZone = 'America/Bogota';
+    const minimumSlotTime = moment.tz(timeZone).add(2, 'hours');
+
+    // --- 1. Calcular el rango de consulta para DynamoDB ---
+    // (Desde el inicio del buffer de 2 horas hasta 30 días en el futuro)
+    const queryStartDate = minimumSlotTime.format('YYYY-MM-DD HH:mm');
+    const queryEndDate = moment
+      .tz(timeZone)
+      .add(30, 'days')
+      .endOf('day')
+      .format('YYYY-MM-DD HH:mm');
+
+    // --- 2. Obtener slots OCUPADOS de DynamoDB ---
+    const busySlots = await this.dynamoService.getAppointmentsForRange(
+      numberId,
+      queryStartDate,
+      queryEndDate,
+    );
 
     const currentDate = moment.tz(timeZone).startOf('day');
     let daysFound = 0;
 
-    // Iteramos hasta 30 días en el futuro para encontrar 'daysToShow' días válidos
     for (let i = 0; i < 30 && daysFound < daysToShow; i++) {
-      const dayOfWeek = currentDate.day(); // Moment.js: 0=Domingo, 1=Lunes, ...
-
-      // Si el día de la semana no está en la lista de días disponibles, lo saltamos
+      const dayOfWeek = currentDate.day();
       if (!daysAvailable.includes(dayOfWeek)) {
         currentDate.add(1, 'day');
         continue;
       }
-
-      // Si el día es válido, incrementamos el contador de días encontrados
       daysFound++;
 
-      // Parseamos las horas de inicio y fin de este día
       const [startH, startM] = startTime.split(':').map(Number);
       const [endH, endM] = endTime.split(':').map(Number);
-
       const slotTime = currentDate
         .clone()
         .hour(startH)
@@ -1369,15 +1380,16 @@ Pago de pensión por $290,000 COP\n`,
         .second(0);
       const endLoopTime = currentDate.clone().hour(endH).minute(endM).second(0);
 
-      // --- Bucle de Horas: iteramos por los slots del día ---
       while (slotTime.isBefore(endLoopTime)) {
-        // 1. Omitir si el slot ya pasó (comparando con la hora actual 'now')
-        if (slotTime.isBefore(now)) {
+        const slotId = slotTime.format('YYYY-MM-DD HH:mm');
+
+        // 1. Omitir si está en el buffer de 2 horas
+        if (slotTime.isBefore(minimumSlotTime)) {
           slotTime.add(intervalMinutes, 'minutes');
           continue;
         }
 
-        // 2. Omitir si el slot cae en un descanso (breakTime)
+        // 2. Omitir si está en un descanso
         let isInBreak = false;
         if (breakTimes && breakTimes.length > 0) {
           for (const breakTime of breakTimes) {
@@ -1385,7 +1397,6 @@ Pago de pensión por $290,000 COP\n`,
               .split(':')
               .map(Number);
             const [breakEndH, breakEndM] = breakTime.end.split(':').map(Number);
-
             const breakStart = currentDate
               .clone()
               .hour(breakStartH)
@@ -1394,8 +1405,6 @@ Pago de pensión por $290,000 COP\n`,
               .clone()
               .hour(breakEndH)
               .minute(breakEndM);
-
-            // Verificamos si el slot *inicia* dentro del rango de descanso
             if (
               slotTime.isSameOrAfter(breakStart) &&
               slotTime.isBefore(breakEnd)
@@ -1405,39 +1414,35 @@ Pago de pensión por $290,000 COP\n`,
             }
           }
         }
-
         if (isInBreak) {
-          // Si estamos en descanso, simplemente avanzamos al siguiente slot
           slotTime.add(intervalMinutes, 'minutes');
           continue;
         }
 
-        // 3. TODO: Verificar disponibilidad real en Google Calendar (usando config.tool)
-        // (Esto lo implementaremos después. Por ahora, asumimos que está disponible)
-        // if (config.tool === 'google_calendar') {
-        //   const isBusy = await this.calendarService.isSlotBusy(...);
-        //   if (isBusy) {
-        //      slotTime.add(intervalMinutes, 'minutes');
-        //      continue;
-        //   }
-        // }
+        // --- 3. NUEVO: Omitir si está OCUPADO en DynamoDB ---
+        if (busySlots.has(slotId)) {
+          this.logger.log(`[DYN] Slot Ocupado (DynamoDB): ${slotId}`);
+          slotTime.add(intervalMinutes, 'minutes');
+          continue;
+        }
 
-        // 4. Si el slot es válido, lo agregamos al formato solicitado
+        // --- 4. TODO: Omitir si está OCUPADO en Google Calendar ---
+        // if (config.tool === 'google_calendar') { ... }
+
+        // 5. Si el slot es válido, lo agregamos
         availableSlots.push({
-          id: slotTime.format('YYYY-MM-DD HH:mm'), // Formato: "2025-11-17 08:00"
+          id: slotId,
           title: slotTime.clone().locale('es').format('ddd MMM DD YYYY HH:mm'),
         });
 
-        // Avanzamos al siguiente slot
         slotTime.add(intervalMinutes, 'minutes');
       }
-      // --- Fin del Bucle de Horas ---
-
-      // Avanzamos al siguiente día
       currentDate.add(1, 'day');
     }
 
-    this.logger.log(`[DYN] Slots de cita generados: ${availableSlots.length}`);
+    this.logger.log(
+      `[DYN] Slots de cita generados (filtrados): ${availableSlots.length}`,
+    );
     return availableSlots;
   }
 
@@ -1451,6 +1456,7 @@ Pago de pensión por $290,000 COP\n`,
     flowJson: any,
     numberId: string,
     userNumber: string,
+    flow_token: string,
   ): Promise<void> {
     try {
       // 1. Intentar crear la cita en el calendario si el flujo lo define
@@ -1471,7 +1477,10 @@ Pago de pensión por $290,000 COP\n`,
       this.logger.log(
         `[DYN] Resumen generado y guardado: ${JSON.stringify(details)}`,
       );
+      delete this.flowSessions[flow_token];
+      this.logger.log(`[DYN] Sesión ${flow_token} finalizada y limpiada.`);
     } catch (e) {
+      delete this.flowSessions[flow_token];
       this.logger.error(
         `[DYN] Error durante la ejecución de fin de flujo: ${e}`,
       );
@@ -1480,7 +1489,7 @@ Pago de pensión por $290,000 COP\n`,
 
   /**
    * Lógica de negocio específica para crear un evento en Google Calendar
-   * si el flujo y la sesión contienen los datos necesarios.
+   * Y guardar un registro en DynamoDB.
    */
   private async _createCalendarEvent(
     newSessionData: any,
@@ -1489,17 +1498,16 @@ Pago de pensión por $290,000 COP\n`,
     userNumber: string,
   ): Promise<void> {
     const screenConfig = flowNavigate.__SCREEN_CONFIG__?.SCREENS;
-    if (!screenConfig) return; // No hay configuración de pantallas
+    if (!screenConfig) return;
 
     const appointmentScreenKey = Object.keys(screenConfig).find(
       (key) => screenConfig[key].type === 'appointmentNode',
     );
-
     if (!appointmentScreenKey) {
       this.logger.log(
         '[DYN] Flujo finalizado. No se encontró appointmentNode.',
       );
-      return; // Este flujo no agenda citas
+      return;
     }
 
     this.logger.log(
@@ -1507,35 +1515,29 @@ Pago de pensión por $290,000 COP\n`,
     );
 
     const apptConfig = screenConfig[appointmentScreenKey].config;
-    const tool = apptConfig.tool; // Ej: "google_calendar"
-    const selectedSlot = newSessionData.date; // El 'name' del Dropdown era 'date'
+    const tool = apptConfig.tool;
+    const selectedSlot = newSessionData.date; // Ej: "2025-11-17 10:00"
 
     if (selectedSlot && tool === 'google_calendar') {
       this.logger.log(
         `[DYN] Slot seleccionado: ${selectedSlot}. Usando ${tool}.`,
       );
 
-      const [date, time] = selectedSlot.split(' '); // ["2025-11-17", "10:00"]
+      const [date, time] = selectedSlot.split(' ');
       let title = apptConfig.appointmentDescription || 'Cita Agendada';
       const duration = apptConfig.intervalMinutes || 60;
 
-      // Reemplaza variables en el título (ej. ${data.nombre_form})
       title = title.replace(/\$\{data\.(\w+)\}/g, (match, key) => {
         return newSessionData[key] ? String(newSessionData[key]) : match;
       });
-      // Reemplaza el teléfono del usuario (ej. ${user.phone})
       title = title.replace(/\$\{user\.phone\}/g, userNumber);
 
-      // Obtiene el email del invitado (del campo "email" del formulario)
       const guestEmail = newSessionData.email ? [newSessionData.email] : [];
-      if (guestEmail.length > 0) {
-        this.logger.log(
-          `[DYN] Email del invitado encontrado: ${guestEmail[0]}`,
-        );
-      }
+      const guestEmailString = guestEmail.length > 0 ? guestEmail[0] : null;
 
       try {
-        await this.calendarService.createEvent(
+        // 1. Crear en Google Calendar
+        const googleEvent: any = await this.calendarService.createEvent(
           numberId,
           date,
           time,
@@ -1543,19 +1545,32 @@ Pago de pensión por $290,000 COP\n`,
           duration,
           guestEmail,
         );
+
+        const googleEventId = googleEvent?.id || 'unknown';
         this.logger.log(
-          `[DYN] Cita creada exitosamente en Google Calendar para ${numberId}.`,
+          `[DYN] Cita creada en Google Calendar (ID: ${googleEventId}).`,
         );
+
+        // --- 2. NUEVO: Guardar en DynamoDB ---
+        await this.dynamoService.saveAppointment(
+          numberId,
+          selectedSlot, // El ID "YYYY-MM-DD HH:mm"
+          userNumber,
+          title,
+          duration,
+          guestEmailString,
+          googleEventId,
+        );
+        // --- FIN DE GUARDADO ---
       } catch (calendarError) {
         this.logger.error(
           `[DYN] ¡FALLO al crear cita en Google Calendar!`,
           calendarError,
         );
-        // No detenemos el flujo, pero el error queda registrado
       }
     } else {
       this.logger.warn(
-        `[DYN] Flow finalizado, pero 'selectedSlot' no se encontró en la sesión o 'tool' no es 'google_calendar'.`,
+        `[DYN] Flow finalizado, pero 'selectedSlot' no se encontró o 'tool' no es 'google_calendar'.`,
       );
     }
   }
@@ -1667,12 +1682,9 @@ Pago de pensión por $290,000 COP\n`,
       );
     }
 
-    // 3. Ensamblar respuesta final
     return {
       version,
       screen: nextScreenId,
-      // Importante: incluimos newSessionData para mantener el estado
-      // y los datos nuevos del trigger y/o details
       data: { ...newSessionData, ...nextScreenData, ...detailsData },
     };
   }
@@ -1692,5 +1704,32 @@ Pago de pensión por $290,000 COP\n`,
         },
       },
     };
+  }
+
+  @Cron(CronExpression.EVERY_30_MINUTES)
+  cleanupInactiveSessions(): void {
+    const now = Date.now();
+    const ONE_HOUR_MS = 60 * 60 * 1000;
+    let cleanedCount = 0;
+
+    this.logger.debug('Ejecutando limpieza de sesiones de Flow inactivas...');
+
+    for (const [flowToken, session] of Object.entries(this.flowSessions)) {
+      if (!session.timestamp) {
+        // (Por si acaso) Limpiar sesiones con formato antiguo
+        delete this.flowSessions[flowToken];
+        cleanedCount++;
+        continue;
+      }
+
+      if (now - session.timestamp > ONE_HOUR_MS) {
+        delete this.flowSessions[flowToken];
+        cleanedCount++;
+      }
+    }
+
+    if (cleanedCount > 0) {
+      this.logger.log(`Limpiadas ${cleanedCount} sesiones de Flow inactivas.`);
+    }
   }
 }
