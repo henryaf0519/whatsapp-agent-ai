@@ -71,13 +71,9 @@ export class SocketGateway
     this.logger.log('WebSocket Gateway inicializado.');
   }
 
-  handleConnection(client: Socket): void {
-    this.logger.log(`Cliente conectado: ${client.id}`);
-  }
+  handleConnection(client: Socket): void {}
 
-  handleDisconnect(client: Socket): void {
-    this.logger.log(`Cliente desconectado: ${client.id}`);
-  }
+  handleDisconnect(client: Socket): void {}
 
   @SubscribeMessage('subscribeToCompany')
   handleSubscribeToCompany(

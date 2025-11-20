@@ -957,17 +957,11 @@ export class DynamoService {
   async getDueSchedules(now: Date): Promise<any[]> {
     const NOW_UTC_STRING = moment.utc(now).toISOString();
     const FIXED_ACTIVE_FLAG = 'ACTIVE';
-    const GSI_NAME = 'ActiveScheduleIndex'; // <-- Nombre del GSI
+    const GSI_NAME = 'ActiveScheduleIndex';
 
-    this.logger.debug(
-      `[Dynamo GSI] Buscando schedules vencidos. Hora límite (UTC): ${NOW_UTC_STRING}`,
-    );
-
-    // QUERY en el GSI: Buscamos todos los activos ('ACTIVE') cuya fecha de envío (sendAt) es <= a la hora actual.
     const command = new QueryCommand({
       TableName: 'MessageSchedules',
       IndexName: GSI_NAME,
-      // PK: is_active_flag (ACTIVE) Y SK: sendAt ( <= hora actual)
       KeyConditionExpression: 'is_active_flag = :activeFlag AND sendAt <= :now',
       ExpressionAttributeValues: {
         ':activeFlag': FIXED_ACTIVE_FLAG,
@@ -979,11 +973,6 @@ export class DynamoService {
     const { Items } = await this.docClient.send(command);
 
     const dueSchedules = Items || [];
-    this.logger.log(
-      `[Dynamo GSI] Schedules Vencidos por Query (Items: ${dueSchedules.length})`,
-    );
-
-    // Filtro final: aplicar la lógica de CRON para schedules recurrentes
     const finalSchedules = dueSchedules.filter((schedule) => {
       if (schedule.scheduleType === 'once') {
         return true;
@@ -1015,10 +1004,6 @@ export class DynamoService {
       }
       return false;
     });
-
-    this.logger.log(
-      `[Dynamo GSI] Retornando ${finalSchedules.length} schedules finales (con filtro CRON).`,
-    );
     return finalSchedules;
   }
 
