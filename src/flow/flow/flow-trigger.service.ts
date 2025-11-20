@@ -16,6 +16,7 @@ export class FlowTriggerService {
       body_text,
       footer_text,
       initial_data,
+      isActive,
     } = body;
 
     const triggerData = {
@@ -25,6 +26,7 @@ export class FlowTriggerService {
       screen_id,
       header_text,
       body_text,
+      isActive,
       footer_text: footer_text || null, // Manejamos el opcional
       initial_data: initial_data || {},
     };

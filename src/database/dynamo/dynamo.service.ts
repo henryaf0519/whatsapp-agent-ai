@@ -1163,7 +1163,6 @@ export class DynamoService {
       number_id: numberId,
       trigger_id: triggerId,
       ...triggerData,
-      isActive: false,
     };
 
     const command = new PutCommand({
