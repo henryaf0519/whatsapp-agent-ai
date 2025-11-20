@@ -674,10 +674,7 @@ Pago de pensión por $290,000 COP\n`,
     userNumber: string;
   } {
     try {
-      this.logger.log(`[DYN] Parseando flow_token: ${flow_token}`);
-      // Asumiendo formato: token_${to}_${businessId}_${Date.now()}
       const parts = flow_token.split('_');
-      this.logger.log(`[DYN] Partes del token: ${JSON.stringify(parts)}`);
       const userNumber = parts[1];
       const numberId = parts[2]; // businessId
       const flow_id = parts[3];
@@ -906,7 +903,6 @@ Pago de pensión por $290,000 COP\n`,
     name: string,
     categories: string[] = ['OTHER'],
   ) {
-    this.logger.log(`Creando Flow "${name}" para WABA ID: ${wabaId}`);
     const token = await this.whatsappService.getWhatsappToken(numberId);
     const url = `${this.baseUrl}/${wabaId}/flows`;
 
@@ -933,7 +929,6 @@ Pago de pensión por $290,000 COP\n`,
    * Corresponde a: GET /{flow_id}
    */
   async getFlowById(flowId: string, numberId: string) {
-    this.logger.log(`Obteniendo Flow (metadata y JSON) con ID: ${flowId}`);
     const token = await this.whatsappService.getWhatsappToken(numberId);
     let flowJsonContent: any = null; // Default a null si no se encuentra
     let flowN: any = null;
@@ -993,7 +988,6 @@ Pago de pensión por $290,000 COP\n`,
    * Corresponde a: GET /{waba_id}/flows
    */
   async getFlows(wabaId: string, numberId: string) {
-    this.logger.log(`Obteniendo todos los flows para WABA ID: ${wabaId}`);
     const token = await this.whatsappService.getWhatsappToken(numberId);
     const url = `${this.baseUrl}/${wabaId}/flows`;
 
@@ -1044,15 +1038,7 @@ Pago de pensión por $290,000 COP\n`,
           Authorization: `Bearer ${token}`,
         },
       });
-
-      this.logger.log(
-        `ÉxITO en Meta API. Respuesta: ${JSON.stringify(response.data)}`,
-      );
       try {
-        this.logger.log(
-          `Guardando definición de flujo en DynamoDB para ${numberId}/${flowId}...`,
-        );
-
         await this.dynamoService.saveClientFlowDefinition(
           numberId,
           flowId,
@@ -1710,26 +1696,16 @@ Pago de pensión por $290,000 COP\n`,
   cleanupInactiveSessions(): void {
     const now = Date.now();
     const ONE_HOUR_MS = 60 * 60 * 1000;
-    let cleanedCount = 0;
-
-    this.logger.debug('Ejecutando limpieza de sesiones de Flow inactivas...');
 
     for (const [flowToken, session] of Object.entries(this.flowSessions)) {
       if (!session.timestamp) {
-        // (Por si acaso) Limpiar sesiones con formato antiguo
         delete this.flowSessions[flowToken];
-        cleanedCount++;
         continue;
       }
 
       if (now - session.timestamp > ONE_HOUR_MS) {
         delete this.flowSessions[flowToken];
-        cleanedCount++;
       }
-    }
-
-    if (cleanedCount > 0) {
-      this.logger.log(`Limpiadas ${cleanedCount} sesiones de Flow inactivas.`);
     }
   }
 }

@@ -421,7 +421,6 @@ export class WhatsappWebhookController implements OnModuleDestroy {
     let processedMessages = 0;
 
     try {
-      this.logger.log('Received webhook request: ', req.body);
       const payload = this.validateWebhookPayload(req.body);
 
       // Process each entry
@@ -490,10 +489,6 @@ export class WhatsappWebhookController implements OnModuleDestroy {
     if (change.field !== 'messages') {
       return;
     }
-
-    this.logger.debug('Processing change', {
-      value: JSON.stringify(change, null, 2),
-    });
 
     const businessId = change.value.metadata.phone_number_id;
     const contact = change.value.contacts?.[0];
@@ -752,7 +747,11 @@ export class WhatsappWebhookController implements OnModuleDestroy {
       } else if (reply.type === 'flow') {
         this.logger.log('Iniciando flow:', reply.template);
 
-        await this.whatsappService.sendFlowMessage(message.from, contactName, businessId);
+        await this.whatsappService.sendFlowMessage(
+          message.from,
+          contactName,
+          businessId,
+        );
       } else {
         await this.whatsappService.sendMessage(
           message.from,

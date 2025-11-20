@@ -1,8 +1,10 @@
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/restrict-template-expressions */
 /* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-// src/bulk-messaging/bulk-messaging.service.ts
-import { Injectable, Logger } from '@nestjs/common';
+// src/bulk-messaging/bulk-messaging/bulk-messaging.service.ts
+import {  Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { DynamoService } from '../../database/dynamo/dynamo.service';
 import { WhatsappService } from '../../whatsapp/whatsapp.service';
@@ -21,6 +23,7 @@ interface TemplateSchedule {
   scheduleId: string;
   name: string;
   templateName: string;
+  templateId: string;
   phoneNumbers: { name: string; number: string }[];
   scheduleType: 'once' | 'recurring';
   waba_id: string;
@@ -39,7 +42,7 @@ export class BulkMessagingService {
     private readonly whatsappService: WhatsappService,
     private readonly socketGateway: SocketGateway,
   ) {
-    this.logger.log(`¡BulkMessagingService inicializado! ID de instancia: `);
+    this.logger.log(`¡BulkMessagingService inicializado!`);
   }
 
   async createSchedule(
@@ -50,9 +53,7 @@ export class BulkMessagingService {
     if (dto.scheduleType === 'once' && dto.sendAt) {
       const localDate = moment.tz(dto.sendAt, 'America/Bogota');
       finalSendAt = localDate.utc().toISOString();
-      this.logger.log(
-        `Programado en Colombia a las ${dto.sendAt}, se guardará en BD como UTC: ${finalSendAt}`,
-      );
+      this.logger.log(`Programado en Colombia: ${dto.sendAt}, Guardado UTC: ${finalSendAt}`);
     }
     const schedule = {
       scheduleId,
@@ -60,6 +61,7 @@ export class BulkMessagingService {
       sendAt: finalSendAt,
       createdAt: new Date().toISOString(),
       isActive: true,
+      is_active_flag: 'ACTIVE',
     };
     return this.dynamoService.saveMessageSchedule(schedule) as Promise<{
       scheduleId: string;
@@ -80,19 +82,24 @@ export class BulkMessagingService {
     }>;
   }
 
+  // =========================================================
+  // HELPERS (Con Logs Detallados)
+  // =========================================================
+
   private buildTemplateComponents(
     template: any,
     contact: Contact,
     mediaId?: string,
+    triggers: any[] = [], 
   ): Array<{
     type: string;
+    sub_type?: string;
+    index?: number;
     parameters: Array<{ type: string; [key: string]: any }>;
   }> {
-    const components: Array<{
-      type: string;
-      parameters: Array<{ type: string; [key: string]: any }>;
-    }> = [];
+    const components: Array<any> = [];
 
+    // 1. HEADER
     if (mediaId) {
       const headerComponent = template.components.find(
         (c) => c.type === 'HEADER',
@@ -112,6 +119,7 @@ export class BulkMessagingService {
       }
     }
 
+    // 2. BODY
     const bodyComponent = template.components.find((c) => c.type === 'BODY');
     if (
       bodyComponent &&
@@ -124,58 +132,65 @@ export class BulkMessagingService {
       });
     }
 
-    // Este array puede expandirse en el futuro si se necesitan más variables (ej: para {{2}}, {{3}})
+    // 3. BUTTONS (Payload Injection)
+    if (triggers && triggers.length > 0) {
+      this.logger.debug(`[Build] Inyectando payloads para ${triggers.length} botones...`);
+      triggers.forEach((trigger) => {
+        // Extraemos índice (Dynamo puede devolver N o S, aseguramos Number)
+        const idxVal = trigger.initial_data?.button_index ?? trigger.initial_data?.index;
+        const buttonIndex = idxVal !== undefined ? Number(idxVal) : undefined;
+
+        if (buttonIndex !== undefined) {
+          this.logger.debug(`[Build] Botón index ${buttonIndex} -> payload: "${trigger.name}"`);
+          components.push({
+            type: 'button',
+            sub_type: 'quick_reply',
+            index: buttonIndex,
+            parameters: [
+              {
+                type: 'payload',
+                payload: trigger.name,
+              },
+            ],
+          });
+        }
+      });
+    }
+
     return components;
   }
 
-  /**
-   * 1. Determina la lista de contactos a los que se enviará el mensaje (estática o dinámica).
-   */
-  private async getContactsForSchedule(
-    schedule: TemplateSchedule,
-  ): Promise<Contact[]> {
+  private async getContactsForSchedule(schedule: TemplateSchedule): Promise<Contact[]> {
+    this.logger.debug(`[Contacts] Resolviendo contactos. Tipo: ${schedule.targetType}`);
+    
     if (schedule.targetType === 'dynamic_stage' && schedule.targetStageId) {
+      this.logger.debug(`[Contacts] Buscando en BD por etapa: "${schedule.targetStageId}" (Business: ${schedule.number_id})`);
       const dynamicContacts = await this.dynamoService.getContactsByStage(
         schedule.number_id,
-        schedule.targetStageId,
+        schedule.targetStageId
       );
-
+      
       const contactsToSend = dynamicContacts
-        .filter((c) => c.conversationId)
-        .map((c) => ({
-          name: c.contactName || c.name,
-          number: c.conversationId,
+        .filter(c => c.conversationId)
+        .map(c => ({
+          name: c.contactName || c.name || 'Cliente',
+          number: c.conversationId
         }));
-
-      if (contactsToSend.length === 0) {
-        this.logger.warn(
-          `No se encontraron contactos para la etapa: ${schedule.targetStageId}.`,
-        );
-      } else {
-        this.logger.log(
-          `Encontrados ${contactsToSend.length} contactos dinámicos.`,
-        );
-      }
+        
+      this.logger.debug(`[Contacts] Contactos dinámicos encontrados: ${contactsToSend.length}`);
       return contactsToSend;
-    } else if (
-      schedule.targetType === 'static_list' &&
-      schedule.phoneNumbers?.length > 0
-    ) {
-      return schedule.phoneNumbers;
-    }
 
-    this.logger.warn(
-      `Configuración de target inválida para el schedule: ${schedule.scheduleId}.`,
-    );
+    } else if (schedule.targetType === 'static_list' && schedule.phoneNumbers?.length > 0) {
+      this.logger.debug(`[Contacts] Usando lista estática (${schedule.phoneNumbers.length} números)`);
+      return schedule.phoneNumbers;
+    } 
+    
+    this.logger.warn(`[Contacts] Configuración inválida o vacía para schedule: ${schedule.scheduleId}`);
     return [];
   }
 
-  /**
-   * 2. Prepara la plantilla, subiendo el archivo multimedia de cabecera si es necesario.
-   */
-  private async prepareTemplateAndMedia(
-    schedule: TemplateSchedule,
-  ): Promise<{ template: any; mediaId?: string }> {
+  private async prepareTemplateAndMedia(schedule: TemplateSchedule): Promise<{ template: any; mediaId?: string }> {
+    this.logger.debug(`[Media] Obteniendo info de plantilla ID: ${schedule.templateId}`);
     const template = await this.whatsappService.getTemplateById(
       schedule.templateId,
       schedule.number_id,
@@ -185,80 +200,90 @@ export class BulkMessagingService {
     const headerComponent = template.components.find(
       (c) =>
         c.type === 'HEADER' &&
-        (c.format === 'IMAGE' ||
-          c.format === 'VIDEO' ||
-          c.format === 'DOCUMENT'),
+        ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(c.format),
     );
 
     if (headerComponent && headerComponent.example?.header_handle?.[0]) {
       const temporaryUrl = headerComponent.example.header_handle[0];
-      const response = await axios.get(temporaryUrl, {
-        responseType: 'arraybuffer',
-      });
-      const imageBuffer = Buffer.from(response.data);
-      const contentType = response.headers['content-type'];
+      this.logger.debug(`[Media] Descargando media header...`);
 
-      mediaId = await this.whatsappService.uploadMedia(
-        schedule.number_id,
-        imageBuffer,
-        contentType,
-      );
-      this.logger.log(`Media subida a Meta con ID: ${mediaId}`);
+      try {
+        const response = await axios.get(temporaryUrl, {
+          responseType: 'arraybuffer',
+        });
+        const imageBuffer = Buffer.from(response.data);
+        const contentType = response.headers['content-type'];
+
+        mediaId = await this.whatsappService.uploadMedia(
+          schedule.number_id,
+          imageBuffer,
+          contentType,
+        );
+        this.logger.debug(`[Media] Subido a Meta. ID: ${mediaId}`);
+      } catch (e) {
+        this.logger.error(`[Media] Error subiendo media header: ${e}`);
+      }
     }
 
     return { template, mediaId };
   }
 
-  /**
-   * 3. Envía el mensaje de plantilla y registra el evento en DynamoDB y Socket.
-   */
   private async sendAndLogTemplateMessage(
     schedule: TemplateSchedule,
     contact: Contact,
     template: any,
     mediaId?: string,
+    triggers: any[] = [],
   ): Promise<void> {
-    const components = this.buildTemplateComponents(template, contact, mediaId);
+    try {
+      const components = this.buildTemplateComponents(
+        template,
+        contact,
+        mediaId,
+        triggers,
+      );
+      const whatsAppResponse = await this.whatsappService.sendTemplateMessage(
+        contact.number,
+        schedule.number_id,
+        template.name,
+        template.language,
+        components,
+      );
+      
+      const messageId = whatsAppResponse.messages[0].id;
+      const messageResp = template.name;
 
-    const whatsAppResponse = await this.whatsappService.sendTemplateMessage(
-      contact.number,
-      schedule.number_id,
-      template.name,
-      template.language,
-      components,
-    );
-
-    const messageId = whatsAppResponse.messages[0].id;
-    const messageResp = template.name;
-
-    // Guardar en DynamoDB (ConversationsTable)
-    await this.dynamoService.saveMessage(
-      schedule.number_id,
-      contact.number,
-      'IA',
-      messageResp,
-      messageId,
-      'SEND',
-      'plantilla',
-    );
-
-    // Notificar por Socket
-    const socketMessage = {
-      from: 'IA',
-      text: messageResp,
-      type: 'plantilla',
-      SK: `MESSAGE#${new Date().toISOString()}`,
-    };
-
-    this.socketGateway.sendNewMessageNotification(
-      schedule.number_id,
-      contact.number,
-      socketMessage,
-    );
+      // Guardar en DynamoDB
+      await this.dynamoService.saveMessage(
+        schedule.number_id,
+        contact.number,
+        'IA',
+        messageResp,
+        messageId,
+        'SEND',
+        'plantilla',
+      );
+      
+      // Socket
+      const socketMessage = {
+        from: 'IA',
+        text: messageResp,
+        type: 'plantilla',
+        SK: `MESSAGE#${new Date().toISOString()}`,
+      };
+      this.socketGateway.sendNewMessageNotification(
+        schedule.number_id,
+        contact.number,
+        socketMessage,
+      );
+      this.logger.debug(`[Send] OK. MessageID: ${messageId}`);
+    } catch (e) {
+      this.logger.error(`[Send] Error enviando a ${contact.number}:`, e);
+    }
   }
 
   // =========================================================
-  // CRON PRINCIPAL (REFACTORIZADO)
+  // CRON PRINCIPAL (CON LOGS DETALLADOS)
   // =========================================================
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -267,59 +292,66 @@ export class BulkMessagingService {
     const schedules: TemplateSchedule[] =
       await this.dynamoService.getDueSchedules(now);
 
-    if (!schedules || schedules.length === 0) return;
+    if (!schedules || schedules.length === 0) {
+       return;
+    }
+
 
     for (const schedule of schedules) {
       try {
-        this.logger.log(`Procesando programación: "${schedule.name}"`);
-
-        // 1. Obtener lista de contactos (estática o dinámica)
         const contactsToSend = await this.getContactsForSchedule(schedule);
 
         if (contactsToSend.length === 0) {
-          // Si no hay contactos (y es de una sola vez), desactivar y continuar
+          this.logger.warn(`[Cron] Schedule sin contactos válidos. Desactivando.`);
           if (schedule.scheduleType === 'once') {
-            await this.dynamoService.deactivateSchedule(schedule.scheduleId);
+             await this.dynamoService.deactivateSchedule(schedule.scheduleId);
           }
-          continue;
+          continue; 
         }
 
-        // 2. Preparar plantilla y media
-        const { template, mediaId } =
-          await this.prepareTemplateAndMedia(schedule);
+        // 3. Preparar Template y Media
+        const { template, mediaId } = await this.prepareTemplateAndMedia(schedule);
 
-        // 3. Enviar a cada contacto y registrar
-        for (const contact of contactsToSend) {
+        const templateTriggers = await this.dynamoService.getTriggersByTemplateId(
+          schedule.number_id, 
+          schedule.templateId 
+        );
+        
+        if (templateTriggers.length > 0) {
+            this.logger.log(`[Cron] Se inyectarán ${templateTriggers.length} payloads de botones.`);
+        } else {
+            this.logger.debug(`[Cron] No se encontraron triggers para botones de esta plantilla.`);
+        }
+
+        // 5. Enviar Mensajes
+        let sentCount = 0;
+        for (const contact of contactsToSend) { 
           await this.sendAndLogTemplateMessage(
             schedule,
             contact,
             template,
             mediaId,
+            templateTriggers, // Pasamos los triggers encontrados
           );
+          sentCount++;
         }
+        this.logger.log(`[Cron] Enviados ${sentCount} mensajes.`);
 
-        // 4. Desactivar si es de una sola vez
+        // 6. Desactivar si es 'once'
         if (schedule.scheduleType === 'once') {
+          this.logger.log(`[Cron] Desactivando schedule 'once'.`);
           await this.dynamoService.deactivateSchedule(schedule.scheduleId);
         }
+        
+        this.logger.log(`[Cron] <<< Schedule "${schedule.name}" completado.`);
 
-        this.logger.log(
-          `Programación "${schedule.name}" completada exitosamente.`,
-        );
       } catch (error) {
-        const errorMessage =
-          typeof error === 'object' && error !== null && 'message' in error
-            ? (error as any).message
-            : String(error);
-        const errorStack =
-          typeof error === 'object' && error !== null && 'stack' in error
-            ? (error as any).stack
-            : undefined;
+        const errorMessage = typeof error === 'object' && error !== null && 'message' in error ? (error as any).message : String(error);
         this.logger.error(
-          `Falló el procesamiento de la campaña "${schedule.name}". Causa: ${errorMessage}`,
-          errorStack,
+          `[Cron] CRITICAL ERROR procesando schedule "${schedule.name}": ${errorMessage}`,
+          error,
         );
-        // Desactivar siempre en caso de error para evitar que se repita la ejecución fallida
+        // Desactivamos para que no se quede en bucle infinito de error
         await this.dynamoService.deactivateSchedule(schedule.scheduleId);
       }
     }

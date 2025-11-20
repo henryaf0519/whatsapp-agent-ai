@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-redundant-type-constituents */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
@@ -951,64 +952,95 @@ export class DynamoService {
     return this.docClient.send(command);
   }
 
+  //
+
   async getDueSchedules(now: Date): Promise<any[]> {
-    const command = new ScanCommand({
+    const NOW_UTC_STRING = moment.utc(now).toISOString();
+    const FIXED_ACTIVE_FLAG = 'ACTIVE';
+    const GSI_NAME = 'ActiveScheduleIndex'; // <-- Nombre del GSI
+
+    this.logger.debug(
+      `[Dynamo GSI] Buscando schedules vencidos. Hora límite (UTC): ${NOW_UTC_STRING}`,
+    );
+
+    // QUERY en el GSI: Buscamos todos los activos ('ACTIVE') cuya fecha de envío (sendAt) es <= a la hora actual.
+    const command = new QueryCommand({
       TableName: 'MessageSchedules',
-      FilterExpression: 'isActive = :true',
-      ExpressionAttributeValues: { ':true': true },
+      IndexName: GSI_NAME,
+      // PK: is_active_flag (ACTIVE) Y SK: sendAt ( <= hora actual)
+      KeyConditionExpression: 'is_active_flag = :activeFlag AND sendAt <= :now',
+      ExpressionAttributeValues: {
+        ':activeFlag': FIXED_ACTIVE_FLAG,
+        ':now': NOW_UTC_STRING,
+      },
+      ScanIndexForward: true, // Ordenar del más antiguo al más nuevo
     });
+
     const { Items } = await this.docClient.send(command);
 
-    if (!Items || Items.length === 0) {
-      return [];
-    }
+    const dueSchedules = Items || [];
+    this.logger.log(
+      `[Dynamo GSI] Schedules Vencidos por Query (Items: ${dueSchedules.length})`,
+    );
 
-    const dueSchedules = Items.filter((schedule) => {
-      if (schedule.scheduleType === 'once' && schedule.sendAt) {
-        // 1. Leemos la fecha UTC y la convertimos a un objeto Moment en la zona de Bogotá
-        const nowMomentUtc = moment.utc(now);
-        const sendAtMomentUtc = moment.utc(schedule.sendAt);
-        return sendAtMomentUtc.isSame(nowMomentUtc, 'minute');
+    // Filtro final: aplicar la lógica de CRON para schedules recurrentes
+    const finalSchedules = dueSchedules.filter((schedule) => {
+      if (schedule.scheduleType === 'once') {
+        return true;
       }
 
       if (schedule.scheduleType === 'recurring' && schedule.cronExpression) {
+        // Lógica de cron-parser (se mantiene igual)
         try {
           const interval = cronParser.parseExpression(schedule.cronExpression, {
             currentDate: new Date(now.getTime() - 60000),
             tz: 'America/Bogota',
           });
           const next = interval.next().toDate();
-          return (
+
+          const isMatch =
             next.getFullYear() === now.getFullYear() &&
             next.getMonth() === now.getMonth() &&
             next.getDate() === now.getDate() &&
             next.getHours() === now.getHours() &&
-            next.getMinutes() === now.getMinutes()
-          );
+            next.getMinutes() === now.getMinutes();
+          return isMatch;
         } catch (err) {
           this.logger.error(
-            `Expresión CRON inválida para scheduleId ${schedule.scheduleId}: "${schedule.cronExpression}"`,
+            `[Dynamo GSI] Expresión CRON inválida para scheduleId ${schedule.scheduleId}`,
             err,
           );
           return false;
         }
       }
-
       return false;
     });
 
-    return dueSchedules;
+    this.logger.log(
+      `[Dynamo GSI] Retornando ${finalSchedules.length} schedules finales (con filtro CRON).`,
+    );
+    return finalSchedules;
   }
+
   async deactivateSchedule(scheduleId: string): Promise<any> {
     const command = new UpdateCommand({
       TableName: 'MessageSchedules',
       Key: { scheduleId },
-      UpdateExpression: 'set isActive = :false',
+      // FIX: Establecemos isActive = false Y removemos el is_active_flag
+      UpdateExpression: 'SET isActive = :false REMOVE is_active_flag',
       ExpressionAttributeValues: {
         ':false': false,
       },
     });
-    return this.docClient.send(command);
+    try {
+      this.logger.log(
+        `[Dynamo] Desactivando Schedule ${scheduleId}. Removiendo GSI flag.`,
+      );
+      return this.docClient.send(command);
+    } catch (error) {
+      this.logger.error(`Error al desactivar schedule ${scheduleId}`, error);
+      throw error;
+    }
   }
 
   async findBusinessByNumberId(numberId: string): Promise<any | undefined> {
@@ -1507,8 +1539,10 @@ export class DynamoService {
       return [];
     }
   }
+
   /**
-   * Busca un disparador de Flow activo que coincida con el payload del botón.
+   * Busca un disparador de Flow ACTIVO que coincida con el payload del botón.
+   * AHORA USA EL GSI 'FlowTriggerNameIndex' para máxima velocidad.
    */
   async getFlowTriggerByPayload(
     numberId: string,
@@ -1516,25 +1550,38 @@ export class DynamoService {
   ): Promise<any | null> {
     const command = new QueryCommand({
       TableName: 'FlowTriggers',
-      KeyConditionExpression: 'number_id = :numberId',
-      FilterExpression: '#name = :triggerName AND isActive = :active',
+      IndexName: 'FlowTriggerNameIndex',
+      KeyConditionExpression: 'number_id = :numberId AND #name = :triggerName',
+      FilterExpression: 'isActive = :active',
       ExpressionAttributeNames: {
-        '#name': 'name', // 'name' es palabra reservada en DynamoDB
+        '#name': 'name',
       },
       ExpressionAttributeValues: {
         ':numberId': numberId,
         ':triggerName': triggerName,
-        ':active': true,
+        ':active': false,
       },
-      Limit: 1,
     });
 
     try {
+      this.logger.debug(
+        `[Dynamo] Buscando Trigger "${triggerName}" en GSI FlowTriggerNameIndex`,
+      );
       const response = await this.docClient.send(command);
-      return response.Items?.[0] ?? null;
+      const item = response.Items?.[0] ?? null;
+
+      if (item) {
+        this.logger.debug(`[Dynamo] ✅ Trigger encontrado: ${item.name}`);
+      } else {
+        this.logger.warn(
+          `[Dynamo] ❌ Trigger no encontrado o inactivo: ${triggerName}`,
+        );
+      }
+
+      return item;
     } catch (error) {
       this.logger.error(
-        `Error buscando FlowTrigger para payload: ${triggerName}`,
+        `Error buscando FlowTrigger por payload: ${triggerName}`,
         error,
       );
       return null;
@@ -1563,6 +1610,41 @@ export class DynamoService {
     } catch (error) {
       this.logger.error(`Error buscando Flow Default para ${numberId}`, error);
       return null;
+    }
+  }
+  /**
+   * Obtiene todos los triggers asociados a un template_id específico.
+   * Esto sirve para configurar los payloads de los botones al enviar la plantilla.
+   */
+  async getTriggersByTemplateId(
+    numberId: string,
+    templateId: string,
+  ): Promise<any[]> {
+    const command = new QueryCommand({
+      TableName: 'FlowTriggers',
+      IndexName: 'TemplateIdIndex',
+      KeyConditionExpression:
+        'number_id = :numberId AND template_id = :templateId',
+      FilterExpression: 'isActive = :active',
+      ExpressionAttributeValues: {
+        ':numberId': numberId,
+        ':templateId': templateId,
+        ':active': false,
+      },
+    });
+
+    try {
+      this.logger.debug(
+        `[Dynamo] Buscando triggers para template ${templateId} en GSI TemplateIdIndex`,
+      );
+      const response = await this.docClient.send(command);
+      return response.Items || [];
+    } catch (error) {
+      this.logger.error(
+        `Error obteniendo triggers para template ${templateId}`,
+        error,
+      );
+      return [];
     }
   }
 }

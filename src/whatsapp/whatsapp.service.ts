@@ -637,7 +637,6 @@ export class WhatsappService {
         },
       };
 
-      // 5. ENVÍO
       const apiUrl = `https://graph.facebook.com/v23.0/${businessId}/messages`;
       const response: AxiosResponse<WhatsAppApiResponse> = await axios.post(
         apiUrl,
