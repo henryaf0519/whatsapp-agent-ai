@@ -575,7 +575,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
           businessId,
           message.from,
           message.from,
-          buttonPayload,
+          payload.text || 'Oprimio  boton plantilla',
           message.id,
           'RECEIVED',
           'button',
@@ -584,7 +584,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         // Notificar Socket (Usuario)
         const sendSocketUser = {
           from: message.from,
-          text: buttonPayload,
+          text: payload.text || 'Oprimio  boton plantilla',
           type: 'button',
           url: payload.url || '',
           SK: `MESSAGE#${new Date().toISOString()}`,
@@ -596,13 +596,13 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         );
 
         // 4. Guardar Mensaje del Sistema (El Flow enviado)
-        const logText = `Flow iniciado por botón: ${trigger.name}`;
+        const logText = `Flow iniciado por botón: ${payload.text}`;
         await this.dynamoService.saveMessage(
           businessId,
           message.from,
           'IA',
           logText,
-          '', // No hay ID de mensaje de WA síncrono aquí, pero se registra el evento
+          '',
           'SEND',
           'flow',
         );
