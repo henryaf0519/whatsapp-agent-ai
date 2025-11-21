@@ -10,9 +10,12 @@ import {
   Get,
   UseGuards,
   Req,
+  Query,
+  Res,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { AuthGuard } from '@nestjs/passport';
+import { Request, Response } from 'express';
 
 @Controller('auth')
 export class AuthController {
@@ -79,5 +82,57 @@ export class AuthController {
     };
 
     return safeUserProfile;
+  }
+
+  /**
+   * ENDPOINT A: Obtener la URL de Autenticación de Google.
+   * Protegido por JWT. El frontend llama a este endpoint cuando el usuario
+   * (ya logueado en nuestro dashboard) hace clic en "Conectar Google Calendar".
+   */
+  @Get('google/url')
+  @UseGuards(AuthGuard('jwt'))
+  getGoogleAuthUrl(@Req() req: Request) {
+    // (req.user as any).userId funciona por tu JwtStrategy
+    const userId = (req.user as any).userId;
+
+    if (!userId) {
+      throw new UnauthorizedException(
+        'No se pudo identificar al usuario desde el token.',
+      );
+    }
+
+    // Generamos la URL de permiso pasándole el email del usuario como 'state'
+    const authUrl = this.authService.generateGoogleAuthUrl(userId);
+
+    // Devolvemos la URL al frontend
+    return { authUrl };
+  }
+
+  /**
+   * ENDPOINT B: Manejar el Callback de Google.
+   * Este endpoint es público (sin JWT Guard) porque es Google quien lo llama.
+   * Google nos envía un 'code' y el 'state' que le pasamos en el Endpoint A.
+   */
+  @Get('google/callback')
+  async handleGoogleCallback(
+    @Query('code') code: string,
+    @Query('state') state: string,
+    @Res() res: Response,
+  ) {
+    if (!code || !state) {
+      throw new UnauthorizedException(
+        'Callback de Google inválido: faltan "code" o "state".',
+      );
+    }
+
+    const userId = state; // El 'state' es el email de nuestro usuario
+    await this.authService.handleGoogleCallback(code, userId);
+
+    // Una vez procesado el token, respondemos con un HTML simple
+    // que le dice a la ventana popup que se cierre.
+    res.setHeader('Content-Type', 'text/html');
+    res.send(
+      '<script>window.close();</script><p>¡Autenticación completada! Ya puedes cerrar esta ventana.</p>',
+    );
   }
 }

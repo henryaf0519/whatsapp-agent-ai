@@ -489,6 +489,7 @@ export class WhatsappWebhookController implements OnModuleDestroy {
     if (change.field !== 'messages') {
       return;
     }
+
     const businessId = change.value.metadata.phone_number_id;
     const contact = change.value.contacts?.[0];
     const contactName = contact?.profile?.name || 'Desconocido';
@@ -544,6 +545,88 @@ export class WhatsappWebhookController implements OnModuleDestroy {
     }
 
     const threadId = this.generateThreadId(message.from);
+    if (payload && payload.type === 'button' && payload.action) {
+      const buttonPayload = payload.action;
+      this.logger.log(
+        `[Webhook] Botón recibido: "${buttonPayload}". Buscando Trigger...`,
+      );
+
+      // 1. Buscar si existe un Flow configurado para este botón
+      const trigger = await this.dynamoService.getFlowTriggerByPayload(
+        businessId,
+        buttonPayload,
+      );
+
+      if (trigger) {
+        this.logger.log(
+          `✅ Trigger encontrado: "${trigger.name}". Enviando Flow específico.`,
+        );
+
+        // 2. Enviar el Flow inmediatamente (pasando el trigger encontrado)
+        await this.whatsappService.sendFlowMessage(
+          message.from,
+          contactName,
+          businessId,
+          trigger,
+        );
+
+        // 3. Guardar Mensaje del Usuario (El clic en el botón)
+        await this.dynamoService.saveMessage(
+          businessId,
+          message.from,
+          message.from,
+          payload.text || 'Oprimio  boton plantilla',
+          message.id,
+          'RECEIVED',
+          'button',
+          payload.url || '',
+        );
+        // Notificar Socket (Usuario)
+        const sendSocketUser = {
+          from: message.from,
+          text: payload.text || 'Oprimio  boton plantilla',
+          type: 'button',
+          url: payload.url || '',
+          SK: `MESSAGE#${new Date().toISOString()}`,
+        };
+        this.socketGateway.sendNewMessageNotification(
+          businessId,
+          message.from,
+          sendSocketUser,
+        );
+
+        // 4. Guardar Mensaje del Sistema (El Flow enviado)
+        const logText = `Flow iniciado por botón: ${payload.text}`;
+        await this.dynamoService.saveMessage(
+          businessId,
+          message.from,
+          'IA',
+          logText,
+          '',
+          'SEND',
+          'flow',
+        );
+        // Notificar Socket (Sistema)
+        const sendSocketIA = {
+          from: 'IA',
+          text: logText,
+          type: 'flow',
+          SK: `MESSAGE#${new Date().toISOString()}`,
+        };
+        this.socketGateway.sendNewMessageNotification(
+          businessId,
+          message.from,
+          sendSocketIA,
+        );
+
+        // 5. ¡IMPORTANTE! Terminamos aquí. No llamamos a la IA.
+        return;
+      } else {
+        this.logger.log(
+          `⚠️ No hay trigger para el botón "${buttonPayload}". Continuando con flujo normal.`,
+        );
+      }
+    }
 
     try {
       await this.dynamoService.saveMessage(
@@ -664,7 +747,11 @@ export class WhatsappWebhookController implements OnModuleDestroy {
       } else if (reply.type === 'flow') {
         this.logger.log('Iniciando flow:', reply.template);
 
-        await this.whatsappService.sendFlowMessage(message.from, contactName, businessId);
+        await this.whatsappService.sendFlowMessage(
+          message.from,
+          contactName,
+          businessId,
+        );
       } else {
         await this.whatsappService.sendMessage(
           message.from,

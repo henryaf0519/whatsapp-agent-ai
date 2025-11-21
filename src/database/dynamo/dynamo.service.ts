@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-redundant-type-constituents */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
@@ -951,64 +952,80 @@ export class DynamoService {
     return this.docClient.send(command);
   }
 
+  //
+
   async getDueSchedules(now: Date): Promise<any[]> {
-    const command = new ScanCommand({
+    const NOW_UTC_STRING = moment.utc(now).toISOString();
+    const FIXED_ACTIVE_FLAG = 'ACTIVE';
+    const GSI_NAME = 'ActiveScheduleIndex';
+
+    const command = new QueryCommand({
       TableName: 'MessageSchedules',
-      FilterExpression: 'isActive = :true',
-      ExpressionAttributeValues: { ':true': true },
+      IndexName: GSI_NAME,
+      KeyConditionExpression: 'is_active_flag = :activeFlag AND sendAt <= :now',
+      ExpressionAttributeValues: {
+        ':activeFlag': FIXED_ACTIVE_FLAG,
+        ':now': NOW_UTC_STRING,
+      },
+      ScanIndexForward: true, // Ordenar del más antiguo al más nuevo
     });
+
     const { Items } = await this.docClient.send(command);
 
-    if (!Items || Items.length === 0) {
-      return [];
-    }
-
-    const dueSchedules = Items.filter((schedule) => {
-      if (schedule.scheduleType === 'once' && schedule.sendAt) {
-        // 1. Leemos la fecha UTC y la convertimos a un objeto Moment en la zona de Bogotá
-        const nowMomentUtc = moment.utc(now);
-        const sendAtMomentUtc = moment.utc(schedule.sendAt);
-        return sendAtMomentUtc.isSame(nowMomentUtc, 'minute');
+    const dueSchedules = Items || [];
+    const finalSchedules = dueSchedules.filter((schedule) => {
+      if (schedule.scheduleType === 'once') {
+        return true;
       }
 
       if (schedule.scheduleType === 'recurring' && schedule.cronExpression) {
+        // Lógica de cron-parser (se mantiene igual)
         try {
           const interval = cronParser.parseExpression(schedule.cronExpression, {
             currentDate: new Date(now.getTime() - 60000),
             tz: 'America/Bogota',
           });
           const next = interval.next().toDate();
-          return (
+
+          const isMatch =
             next.getFullYear() === now.getFullYear() &&
             next.getMonth() === now.getMonth() &&
             next.getDate() === now.getDate() &&
             next.getHours() === now.getHours() &&
-            next.getMinutes() === now.getMinutes()
-          );
+            next.getMinutes() === now.getMinutes();
+          return isMatch;
         } catch (err) {
           this.logger.error(
-            `Expresión CRON inválida para scheduleId ${schedule.scheduleId}: "${schedule.cronExpression}"`,
+            `[Dynamo GSI] Expresión CRON inválida para scheduleId ${schedule.scheduleId}`,
             err,
           );
           return false;
         }
       }
-
       return false;
     });
-
-    return dueSchedules;
+    return finalSchedules;
   }
+
   async deactivateSchedule(scheduleId: string): Promise<any> {
     const command = new UpdateCommand({
       TableName: 'MessageSchedules',
       Key: { scheduleId },
-      UpdateExpression: 'set isActive = :false',
+      // FIX: Establecemos isActive = false Y removemos el is_active_flag
+      UpdateExpression: 'SET isActive = :false REMOVE is_active_flag',
       ExpressionAttributeValues: {
         ':false': false,
       },
     });
-    return this.docClient.send(command);
+    try {
+      this.logger.log(
+        `[Dynamo] Desactivando Schedule ${scheduleId}. Removiendo GSI flag.`,
+      );
+      return this.docClient.send(command);
+    } catch (error) {
+      this.logger.error(`Error al desactivar schedule ${scheduleId}`, error);
+      throw error;
+    }
   }
 
   async findBusinessByNumberId(numberId: string): Promise<any | undefined> {
@@ -1163,7 +1180,6 @@ export class DynamoService {
       number_id: numberId,
       trigger_id: triggerId,
       ...triggerData,
-      isActive:false
     };
 
     const command = new PutCommand({
@@ -1276,6 +1292,344 @@ export class DynamoService {
         error,
       );
       throw new Error('Error al actualizar el disparador');
+    }
+  }
+
+  /**
+   * Actualiza el registro de un usuario en la tabla 'login' para
+   * almacenar su Google Refresh Token y marcar la autenticación como completada.
+   * @param email El PK del usuario (email).
+   * @param refreshToken El token a guardar.
+   */
+  async updateUserGoogleRefreshToken(
+    email: string,
+    refreshToken: string,
+  ): Promise<any> {
+    const command = new UpdateCommand({
+      TableName: 'login',
+      Key: {
+        email: email,
+      },
+      UpdateExpression:
+        'SET google_refresh_token = :token, hasGoogleAuth = :bool, updatedAt = :updatedAt',
+      ExpressionAttributeValues: {
+        ':token': refreshToken,
+        ':bool': true,
+        ':updatedAt': new Date().toISOString(),
+      },
+      ReturnValues: 'UPDATED_NEW',
+    });
+
+    try {
+      this.logger.log(
+        `Actualizando Google Refresh Token para el usuario: ${email}`,
+      );
+      const response = await this.docClient.send(command);
+      this.logger.log(
+        `Token guardado exitosamente para: ${email}`,
+        response.Attributes,
+      );
+      return response.Attributes;
+    } catch (error) {
+      this.logger.error(
+        `Error al guardar el refresh token para ${email}`,
+        error,
+      );
+      throw new Error(
+        'Error al actualizar el token del usuario en la base de datos.',
+      );
+    }
+  }
+
+  /**
+   * Guarda un registro de una cita agendada en DynamoDB.
+   * PK: APPT#[numberId]
+   * SK: SLOT#[YYYY-MM-DD HH:mm]
+   */
+  async saveAppointment(
+    numberId: string,
+    slotId: string, // Ej: "2025-11-17 10:00"
+    userNumber: string,
+    title: string,
+    duration: number,
+    guestEmail: string | null,
+    googleEventId: string,
+  ): Promise<any> {
+    const item = {
+      PK: `APPT#${numberId}`, // Partición por cliente
+      SK: `SLOT#${slotId}`, // Clave de ordenación por fecha/hora
+      userNumber: userNumber,
+      title: title,
+      durationMinutes: duration,
+      guestEmail: guestEmail || null,
+      googleEventId: googleEventId,
+      createdAt: new Date().toISOString(),
+    };
+
+    const command = new PutCommand({
+      TableName: 'Appointments', // <-- (Asegúrate de que esta tabla exista en tu DynamoDB)
+      Item: item,
+    });
+
+    try {
+      this.logger.log(`Guardando cita en DynamoDB: ${item.PK} / ${item.SK}`);
+      return await this.docClient.send(command);
+    } catch (error) {
+      this.logger.error('Error al guardar cita en DynamoDB', error);
+      throw new Error('Error al guardar cita en DynamoDB');
+    }
+  }
+
+  /**
+   * Obtiene una lista de slots de citas YA OCUPADOS para un cliente
+   * dentro de un rango de fechas.
+   */
+  async getAppointmentsForRange(
+    numberId: string,
+    startDate: string, // Formato "YYYY-MM-DD HH:mm"
+    endDate: string, // Formato "YYYY-MM-DD HH:mm"
+  ): Promise<Set<string>> {
+    const command = new QueryCommand({
+      TableName: 'Appointments',
+      KeyConditionExpression: 'PK = :pk AND SK BETWEEN :start AND :end',
+      ExpressionAttributeValues: {
+        ':pk': `APPT#${numberId}`,
+        ':start': `SLOT#${startDate}`,
+        ':end': `SLOT#${endDate}`,
+      },
+    });
+
+    try {
+      this.logger.log(
+        `Buscando citas para ${numberId} entre ${startDate} y ${endDate}`,
+      );
+      const { Items } = await this.docClient.send(command);
+
+      if (!Items || Items.length === 0) {
+        return new Set<string>(); // No hay citas ocupadas
+      }
+
+      // Devolvemos un Set (para búsqueda rápida) de los slots ocupados
+      // Ej: Set { "2025-11-17 10:00", "2025-11-17 14:00" }
+      const busySlots = new Set(
+        Items.map((item) => item.SK.replace('SLOT#', '')),
+      );
+      this.logger.log(
+        `Encontrados ${busySlots.size} slots ocupados en DynamoDB.`,
+      );
+      return busySlots;
+    } catch (error) {
+      this.logger.error('Error al obtener rango de citas de DynamoDB', error);
+      return new Set<string>(); // Devolver vacío en caso de error
+    }
+  }
+
+  /**
+   * Guarda la configuración de etapas del CRM para una empresa.
+   * Se almacena en una tabla de configuraciones (ej. CRMSettings o reutilizando una existente con SK específico).
+   */
+  async saveCrmStages(numberId: string, stages: any[]): Promise<any> {
+    const item = {
+      number_id: numberId, // Partition Key
+      stages: stages,
+      updatedAt: new Date().toISOString(),
+    };
+
+    // Usamos una tabla dedicada o una genérica. Sugiero 'CRMSettings'
+    const command = new PutCommand({
+      TableName: 'CRMSettings',
+      Item: item,
+    });
+
+    try {
+      await this.docClient.send(command);
+      this.logger.log(`Configuración de etapas guardada para ${numberId}`);
+      return item;
+    } catch (error) {
+      this.logger.error('Error al guardar etapas del CRM', error);
+      throw new Error('No se pudo guardar la configuración de etapas.');
+    }
+  }
+
+  /**
+   * Obtiene la configuración de etapas del CRM.
+   */
+  async getCrmStages(numberId: string): Promise<any[]> {
+    const command = new GetCommand({
+      TableName: 'CRMSettings',
+      Key: {
+        number_id: numberId,
+      },
+    });
+
+    try {
+      const result = await this.docClient.send(command);
+      if (result.Item && result.Item.stages) {
+        return result.Item.stages;
+      }
+      // Retornar etapas por defecto si no hay configuración previa
+      return [
+        { id: 'Nuevo', name: 'Nuevo Lead', color: '#3B82F6', isSystem: true },
+        {
+          id: 'Contactado',
+          name: 'Contactado',
+          color: '#6366F1',
+          isSystem: false,
+        },
+        {
+          id: 'Propuesta',
+          name: 'Propuesta',
+          color: '#A855F7',
+          isSystem: false,
+        },
+        { id: 'Vendido', name: 'Vendido', color: '#22C55E', isSystem: false },
+        { id: 'Perdido', name: 'Perdido', color: '#6B7280', isSystem: false },
+      ];
+    } catch (error) {
+      this.logger.error('Error al obtener etapas del CRM', error);
+      return [];
+    }
+  }
+  /**
+   * Obtiene contactos por businessId y stage de la tabla ChatControl.
+   */
+  async getContactsByStage(businessId: string, stage: string): Promise<any[]> {
+    const command = new QueryCommand({
+      TableName: 'ChatControl',
+      KeyConditionExpression: 'businessId = :businessId',
+      FilterExpression: '#stage = :stageValue',
+      ExpressionAttributeNames: {
+        '#stage': 'stage',
+      },
+      ExpressionAttributeValues: {
+        ':businessId': businessId,
+        ':stageValue': stage,
+      },
+    });
+
+    try {
+      this.logger.log(
+        `Fetching contacts for business ${businessId} in stage: ${stage}`,
+      );
+      const { Items } = await this.docClient.send(command);
+      this.logger.log(
+        `Found ${Items?.length || 0} contacts in stage ${stage} for business ${businessId}`,
+      );
+      return Items || [];
+    } catch (error) {
+      this.logger.error(
+        `Error fetching contacts by stage for ${businessId}/${stage}`,
+        error,
+      );
+      return [];
+    }
+  }
+
+  /**
+   * Busca un disparador de Flow ACTIVO que coincida con el payload del botón.
+   * AHORA USA EL GSI 'FlowTriggerNameIndex' para máxima velocidad.
+   */
+  async getFlowTriggerByPayload(
+    numberId: string,
+    triggerName: string,
+  ): Promise<any | null> {
+    const command = new QueryCommand({
+      TableName: 'FlowTriggers',
+      IndexName: 'FlowTriggerNameIndex',
+      KeyConditionExpression: 'number_id = :numberId AND #name = :triggerName',
+      FilterExpression: 'isActive = :active',
+      ExpressionAttributeNames: {
+        '#name': 'name',
+      },
+      ExpressionAttributeValues: {
+        ':numberId': numberId,
+        ':triggerName': triggerName,
+        ':active': false,
+      },
+    });
+
+    try {
+      this.logger.debug(
+        `[Dynamo] Buscando Trigger "${triggerName}" en GSI FlowTriggerNameIndex`,
+      );
+      const response = await this.docClient.send(command);
+      const item = response.Items?.[0] ?? null;
+
+      if (item) {
+        this.logger.debug(`[Dynamo] ✅ Trigger encontrado: ${item.name}`);
+      } else {
+        this.logger.warn(
+          `[Dynamo] ❌ Trigger no encontrado o inactivo: ${triggerName}`,
+        );
+      }
+
+      return item;
+    } catch (error) {
+      this.logger.error(
+        `Error buscando FlowTrigger por payload: ${triggerName}`,
+        error,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Obtiene el Flow por Defecto (el único que debe estar activo si no es por botón).
+   * Filtra por number_id y isActive = true.
+   */
+  async getDefaultFlowTrigger(numberId: string): Promise<any | null> {
+    const command = new QueryCommand({
+      TableName: 'FlowTriggers',
+      KeyConditionExpression: 'number_id = :numberId',
+      FilterExpression: 'isActive = :active',
+      ExpressionAttributeValues: {
+        ':numberId': numberId,
+        ':active': true,
+      },
+    });
+
+    try {
+      this.logger.log(`Buscando Flow Default (Activo) para ${numberId}`);
+      const response = await this.docClient.send(command);
+      return response.Items?.[0] ?? null;
+    } catch (error) {
+      this.logger.error(`Error buscando Flow Default para ${numberId}`, error);
+      return null;
+    }
+  }
+  /**
+   * Obtiene todos los triggers asociados a un template_id específico.
+   * Esto sirve para configurar los payloads de los botones al enviar la plantilla.
+   */
+  async getTriggersByTemplateId(
+    numberId: string,
+    templateId: string,
+  ): Promise<any[]> {
+    const command = new QueryCommand({
+      TableName: 'FlowTriggers',
+      IndexName: 'TemplateIdIndex',
+      KeyConditionExpression:
+        'number_id = :numberId AND template_id = :templateId',
+      FilterExpression: 'isActive = :active',
+      ExpressionAttributeValues: {
+        ':numberId': numberId,
+        ':templateId': templateId,
+        ':active': false,
+      },
+    });
+
+    try {
+      this.logger.debug(
+        `[Dynamo] Buscando triggers para template ${templateId} en GSI TemplateIdIndex`,
+      );
+      const response = await this.docClient.send(command);
+      return response.Items || [];
+    } catch (error) {
+      this.logger.error(
+        `Error obteniendo triggers para template ${templateId}`,
+        error,
+      );
+      return [];
     }
   }
 }
