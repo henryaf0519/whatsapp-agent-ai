@@ -50,6 +50,12 @@ export class BulkMessagingService {
   ): Promise<{ scheduleId: string; [key: string]: any }> {
     const scheduleId = uuidv4();
     let finalSendAt = dto.sendAt;
+
+    if (dto.scheduleType === 'recurring' && !finalSendAt) {
+      const baseDate = moment(); 
+      finalSendAt = baseDate.utc().startOf('minute').toISOString();
+      this.logger.log(`[Schedule Recurrente] Fecha de activación ajustada a inicio de minuto: ${finalSendAt}`);
+    }
     if (dto.scheduleType === 'once' && dto.sendAt) {
       const localDate = moment.tz(dto.sendAt, 'America/Bogota');
       finalSendAt = localDate.utc().toISOString();
