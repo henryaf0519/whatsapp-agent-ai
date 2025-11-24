@@ -1593,8 +1593,9 @@ Pago de pensión por $290,000 COP\n`,
     const tool = apptConfig.tool;
     const selectedSlot = newSessionData.date;
 
-    // ✅ 1. CARGAMOS EL MAPA DE RECURSOS (La configuración confiable)
+    // ✅ 1. CARGAMOS EL MAPA Y VERIFICAMOS SI ESTÁ VACÍO
     const resourceMapping = apptConfig.resourceMapping || {};
+    const hasResources = Object.keys(resourceMapping).length > 0;
 
     if (!selectedSlot || tool !== 'google_calendar') {
       this.logger.warn(
@@ -1607,53 +1608,37 @@ Pago de pensión por $290,000 COP\n`,
     let title = apptConfig.appointmentDescription || 'Cita Agendada';
     const duration = apptConfig.intervalMinutes || 60;
 
-    // --- VARIABLES POR DEFECTO ---
+    // Variables por defecto
     let selectedProfessionalId = 'any_professional';
-    let professionalDisplayName = 'Profesional Asignado';
+    let professionalDisplayName = '';
 
-    // --- 2. VALIDACIÓN ESTRICTA: BUSCAR SI EL DATO ENTRANTE EXISTE EN EL MAPA ---
+    // --- 2. INTENTAR DETECTAR SELECCIÓN SOLO SI HAY RECURSOS ---
+    if (hasResources) {
+      const sessionValues = Object.values(newSessionData);
+      let foundMapping: any = null;
 
-    // Recorremos todos los valores que envió el usuario (respuestas del formulario)
-    const sessionValues = Object.values(newSessionData);
-    let foundMapping: any = null;
-
-    for (const value of sessionValues) {
-      // Solo nos interesan los strings (porque los IDs de opción son strings)
-      if (typeof value === 'string') {
-        // 🔍 VALIDACIÓN CLAVE: ¿Este valor existe como LLAVE en mi mapa?
-        if (resourceMapping[value]) {
-          // ¡SÍ EXISTE! Es un ID válido (ej: opcion_1763...) configurado en el nodo.
+      for (const value of sessionValues) {
+        if (typeof value === 'string' && resourceMapping[value]) {
           foundMapping = resourceMapping[value];
-          this.logger.log(
-            `[DYN] Opción válida encontrada en configuración: ${value}`,
-          );
-          break; // Dejamos de buscar, ya encontramos al profesional.
+          break;
         }
+      }
+
+      if (foundMapping) {
+        selectedProfessionalId = foundMapping.id;
+        professionalDisplayName = foundMapping.nombre;
       }
     }
 
-    // Si la validación pasó, usamos los datos del mapa
-    if (foundMapping) {
-      selectedProfessionalId = foundMapping.id; // Ej: "henry_arevalo"
-      professionalDisplayName = foundMapping.nombre; // Ej: "Henry Arevalo"
-    } else {
-      this.logger.warn(
-        `[DYN] Ningún valor de la sesión coincide con una opción válida en resourceMapping. Usando asignación automática.`,
-      );
-    }
-
-    // --- 3. LÓGICA ALEATORIA (Si quedó en 'any_professional') ---
-    if (selectedProfessionalId === 'any_professional') {
+    // --- 3. LÓGICA ALEATORIA (Solo si es 'any_professional' Y HAY RECURSOS CONFIGURADOS) ---
+    if (selectedProfessionalId === 'any_professional' && hasResources) {
       const allResources = Object.values(resourceMapping) as any[];
-      // Filtramos para obtener solo los IDs reales
       const allResourceIds = allResources
         .map((r) => r.id)
         .filter((id) => id !== 'any_professional');
 
       const occupation =
         this.flowSessions.slotOccupation?.[selectedSlot] || new Set();
-
-      // Disponibles = Total - Ocupados
       const availableResourceIds = allResourceIds.filter(
         (id) => !occupation.has(id),
       );
@@ -1664,13 +1649,10 @@ Pago de pensión por $290,000 COP\n`,
         );
         selectedProfessionalId = availableResourceIds[randomIndex];
 
-        // Recuperar nombre bonito para el título
         const foundResource = allResources.find(
           (r) => r.id === selectedProfessionalId,
         );
-        if (foundResource) {
-          professionalDisplayName = foundResource.nombre;
-        }
+        if (foundResource) professionalDisplayName = foundResource.nombre;
 
         this.logger.log(
           `[DYN] Asignación abierta. Recurso seleccionado al azar: ${selectedProfessionalId}`,
@@ -1682,6 +1664,12 @@ Pago de pensión por $290,000 COP\n`,
         return;
       }
     }
+    // ✅ NUEVO: SI NO HAY RECURSOS (Agenda General), NO HACEMOS NADA
+    else if (!hasResources) {
+      this.logger.log(
+        `[DYN] Agenda General (Sin profesionales específicos). Agendando como 'any_professional'.`,
+      );
+    }
 
     // --- 4. TÍTULO Y GUARDADO ---
     title = title.replace(/\$\{data\.(\w+)\}/g, (match, key) => {
@@ -1689,7 +1677,11 @@ Pago de pensión por $290,000 COP\n`,
     });
     title = title.replace(/\$\{user\.phone\}/g, userNumber);
 
-    if (selectedProfessionalId !== 'any_professional') {
+    // Solo agregamos el nombre si realmente hay un profesional específico y nombre válido
+    if (
+      selectedProfessionalId !== 'any_professional' &&
+      professionalDisplayName
+    ) {
       title += ` Profesional: ${professionalDisplayName}`;
     }
 
@@ -1716,7 +1708,7 @@ Pago de pensión por $290,000 COP\n`,
         duration,
         guestEmailString,
         googleEventId,
-        selectedProfessionalId, // Guardamos el slug validado o generado
+        selectedProfessionalId, // Será 'any_professional' en caso de agenda general
       );
 
       this.logger.log(
