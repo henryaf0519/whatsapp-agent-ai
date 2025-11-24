@@ -1346,33 +1346,41 @@ export class DynamoService {
    * PK: APPT#[numberId]
    * SK: SLOT#[YYYY-MM-DD HH:mm]
    */
+  // En src/database/dynamo/dynamo.service.ts
+
+  // 1. Modificar saveAppointment
   async saveAppointment(
     numberId: string,
-    slotId: string, // Ej: "2025-11-17 10:00"
+    slotId: string, // "YYYY-MM-DD HH:mm"
     userNumber: string,
     title: string,
     duration: number,
     guestEmail: string | null,
     googleEventId: string,
+    professionalId: string = 'any_professional', // <--- NUEVO PARÁMETRO
   ): Promise<any> {
+    // Construimos la SK compuesta
+    const skComposite = `SLOT#${slotId}#${professionalId}`;
+
     const item = {
-      PK: `APPT#${numberId}`, // Partición por cliente
-      SK: `SLOT#${slotId}`, // Clave de ordenación por fecha/hora
+      PK: `APPT#${numberId}`,
+      SK: skComposite, // Ahora es única por profesional
       userNumber: userNumber,
       title: title,
       durationMinutes: duration,
       guestEmail: guestEmail || null,
       googleEventId: googleEventId,
+      professionalId: professionalId, // Guardamos el ID limpio también
       createdAt: new Date().toISOString(),
     };
 
     const command = new PutCommand({
-      TableName: 'Appointments', // <-- (Asegúrate de que esta tabla exista en tu DynamoDB)
+      TableName: 'Appointments',
       Item: item,
     });
 
     try {
-      this.logger.log(`Guardando cita en DynamoDB: ${item.PK} / ${item.SK}`);
+      this.logger.log(`Guardando cita: ${item.PK} / ${item.SK}`);
       return await this.docClient.send(command);
     } catch (error) {
       this.logger.error('Error al guardar cita en DynamoDB', error);
@@ -1380,47 +1388,30 @@ export class DynamoService {
     }
   }
 
-  /**
-   * Obtiene una lista de slots de citas YA OCUPADOS para un cliente
-   * dentro de un rango de fechas.
-   */
+  // Esta función ahora debe devolver más información, no solo un Set de fechas,
+  // sino un mapa o array de objetos para saber QUIÉN está ocupado.
   async getAppointmentsForRange(
     numberId: string,
-    startDate: string, // Formato "YYYY-MM-DD HH:mm"
-    endDate: string, // Formato "YYYY-MM-DD HH:mm"
-  ): Promise<Set<string>> {
+    startDate: string,
+    endDate: string,
+  ): Promise<any[]> {
+    // <--- Cambiamos el retorno a any[] para procesarlo en el flow.service
     const command = new QueryCommand({
       TableName: 'Appointments',
       KeyConditionExpression: 'PK = :pk AND SK BETWEEN :start AND :end',
       ExpressionAttributeValues: {
         ':pk': `APPT#${numberId}`,
-        ':start': `SLOT#${startDate}`,
-        ':end': `SLOT#${endDate}`,
+        ':start': `SLOT#${startDate}`, // Dynamo busca alfabéticamente, funcionará bien
+        ':end': `SLOT#${endDate}~`, // El ~ asegura que incluya sufijos
       },
     });
 
     try {
-      this.logger.log(
-        `Buscando citas para ${numberId} entre ${startDate} y ${endDate}`,
-      );
       const { Items } = await this.docClient.send(command);
-
-      if (!Items || Items.length === 0) {
-        return new Set<string>(); // No hay citas ocupadas
-      }
-
-      // Devolvemos un Set (para búsqueda rápida) de los slots ocupados
-      // Ej: Set { "2025-11-17 10:00", "2025-11-17 14:00" }
-      const busySlots = new Set(
-        Items.map((item) => item.SK.replace('SLOT#', '')),
-      );
-      this.logger.log(
-        `Encontrados ${busySlots.size} slots ocupados en DynamoDB.`,
-      );
-      return busySlots;
+      return Items || [];
     } catch (error) {
-      this.logger.error('Error al obtener rango de citas de DynamoDB', error);
-      return new Set<string>(); // Devolver vacío en caso de error
+      this.logger.error('Error al obtener rango de citas', error);
+      return [];
     }
   }
 

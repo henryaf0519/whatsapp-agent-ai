@@ -95,10 +95,6 @@ export class SocketGateway
         data: { status: 'error', message: 'Invalid conversationId provided.' },
       };
     }
-
-    this.logger.log(
-      `Cliente ${client.id} se ha suscrito al chat ${conversationId}`,
-    );
     client.join(conversationId);
 
     return {
