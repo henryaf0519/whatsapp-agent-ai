@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable no-case-declarations */
 /* eslint-disable @typescript-eslint/restrict-template-expressions */
 /* eslint-disable @typescript-eslint/await-thenable */
@@ -1289,9 +1291,12 @@ Pago de pensión por $290,000 COP\n`,
    * Maneja la lógica de los dataSourceTriggers del __SCREEN_CONFIG__
    * Esta función actúa como un enrutador para llamar a la lógica correcta.
    */
+  /**
+   * Maneja la lógica de los dataSourceTriggers del __SCREEN_CONFIG__
+   */
   private async _handleDataSourceTrigger(
     trigger: string,
-    config: any,
+    config: any, // Aquí viene la config del nodo (incluyendo resourceMapping)
     numberId: string,
     data: any,
   ): Promise<Record<string, any>> {
@@ -1299,8 +1304,55 @@ Pago de pensión por $290,000 COP\n`,
 
     switch (trigger) {
       case 'fetch_available_dates':
-        const dates = await this._generateAvailableDates(config, numberId);
+        // 1. Buscar el Raw ID seleccionado por el usuario (ej: "opcion_1763...")
+        let rawOptionIdSelected: string | undefined;
+
+        // Filtramos claves internas de Meta
+        const potentialKeys = Object.keys(data).filter(
+          (k) => k !== 'flow_token' && k !== 'screen' && k !== 'action',
+        );
+
+        for (const key of potentialKeys) {
+          const val = data[key];
+          // Detectamos si el valor parece un ID de opción
+          if (
+            typeof val === 'string' &&
+            (val.startsWith('opcion_') || val === 'any_professional')
+          ) {
+            rawOptionIdSelected = val;
+            break;
+          }
+        }
+
+        // 2. TRADUCCIÓN: Buscar en el resourceMapping el ID real (slug)
+        let selectedProfessionalId = 'any_professional'; // Default
+
+        if (rawOptionIdSelected && config.resourceMapping) {
+          // Buscamos el objeto asociado a esa opción
+          const mappingData = config.resourceMapping[rawOptionIdSelected];
+
+          if (mappingData && mappingData.id) {
+            // ¡AQUÍ ESTÁ LA CORRECCIÓN!
+            // Usamos el .id del objeto (ej: "henry_arevalo")
+            selectedProfessionalId = mappingData.id;
+          } else if (rawOptionIdSelected === 'any_professional') {
+            selectedProfessionalId = 'any_professional';
+          }
+        }
+
+        this.logger.log(
+          `[DYN] Buscando disponibilidad para: ${selectedProfessionalId} (Raw: ${rawOptionIdSelected})`,
+        );
+
+        // 3. Llamar a la función generadora con el ID traducido
+        const dates = await this._generateAvailableDates(
+          config,
+          numberId,
+          selectedProfessionalId, // Ahora enviamos "henry_arevalo"
+          config.resourceMapping || {},
+        );
         return { date: dates };
+
       default:
         this.logger.warn(`[DYN] dataSourceTrigger no reconocido: ${trigger}`);
         return {};
@@ -1313,9 +1365,12 @@ Pago de pensión por $290,000 COP\n`,
    * 2. Consulta DynamoDB por slots ya ocupados
    * 3. Filtra la lista estática y devuelve solo los slots libres.
    */
+
   private async _generateAvailableDates(
     config: any,
-    numberId: string, // <-- AÑADIDO: Necesitamos saber para qué cliente buscar
+    numberId: string,
+    selectedProfessionalId: string = 'any_professional',
+    resourceMapping: Record<string, any> = {}, // Recibe el objeto complejo
   ): Promise<{ id: string; title: string }[]> {
     const {
       daysToShow,
@@ -1330,8 +1385,14 @@ Pago de pensión por $290,000 COP\n`,
     const timeZone = 'America/Bogota';
     const minimumSlotTime = moment.tz(timeZone).add(2, 'hours');
 
-    // --- 1. Calcular el rango de consulta para DynamoDB ---
-    // (Desde el inicio del buffer de 2 horas hasta 30 días en el futuro)
+    // 1. Extraer todos los SLUGs válidos (excluyendo 'any_professional')
+    const allResourceIds = Object.values(resourceMapping)
+      .map((r: any) => r.id)
+      .filter((id: string) => id !== 'any_professional');
+
+    // Capacidad total del equipo
+    const maxCapacity = new Set(allResourceIds).size;
+
     const queryStartDate = minimumSlotTime.format('YYYY-MM-DD HH:mm');
     const queryEndDate = moment
       .tz(timeZone)
@@ -1339,13 +1400,60 @@ Pago de pensión por $290,000 COP\n`,
       .endOf('day')
       .format('YYYY-MM-DD HH:mm');
 
-    // --- 2. Obtener slots OCUPADOS de DynamoDB ---
-    const busySlots = await this.dynamoService.getAppointmentsForRange(
+    // 2. Obtener citas crudas de DynamoDB
+    const rawAppointments = await this.dynamoService.getAppointmentsForRange(
       numberId,
       queryStartDate,
       queryEndDate,
     );
 
+    // 3. Crear Set de Slots Ocupados (FILTRADO INTELIGENTE)
+    const busySlots = new Set<string>();
+
+    // Mapa temporal para contar ocupación por slot: { '2025-11-20 10:00': Set('henry', 'stefanny') }
+    const slotOccupationMap: Record<string, Set<string>> = {};
+
+    rawAppointments.forEach((appt) => {
+      const parts = appt.SK.split('#');
+      if (parts.length >= 2) {
+        const slotTimeStr = parts[1]; // "YYYY-MM-DD HH:mm"
+        const apptProfId = appt.professionalId; // El slug guardado en la cita
+
+        // Lógica A: Usuario pidió un profesional ESPECÍFICO
+        if (selectedProfessionalId !== 'any_professional') {
+          if (apptProfId === selectedProfessionalId) {
+            busySlots.add(slotTimeStr);
+          }
+        }
+        // Lógica B: Usuario pidió CUALQUIERA (Any)
+        else {
+          if (!slotOccupationMap[slotTimeStr]) {
+            slotOccupationMap[slotTimeStr] = new Set();
+          }
+          slotOccupationMap[slotTimeStr].add(apptProfId);
+        }
+      }
+    });
+
+    // Si estamos en modo ANY, procesamos el mapa de ocupación
+    if (selectedProfessionalId === 'any_professional') {
+      // Guardamos este mapa en sesión para usarlo luego en _createCalendarEvent (random pick)
+      if (!this.flowSessions.slotOccupation) {
+        this.flowSessions.slotOccupation = {};
+      }
+
+      for (const [slot, busyProfs] of Object.entries(slotOccupationMap)) {
+        // Guardamos en sesión qué profesionales están ocupados en este slot
+        this.flowSessions.slotOccupation[slot] = busyProfs;
+
+        // Si TODOS los recursos están ocupados, bloqueamos el slot
+        if (busyProfs.size >= maxCapacity) {
+          busySlots.add(slot);
+        }
+      }
+    }
+
+    // 4. Generación de Slots (Loop estándar)
     const currentDate = moment.tz(timeZone).startOf('day');
     let daysFound = 0;
 
@@ -1369,13 +1477,11 @@ Pago de pensión por $290,000 COP\n`,
       while (slotTime.isBefore(endLoopTime)) {
         const slotId = slotTime.format('YYYY-MM-DD HH:mm');
 
-        // 1. Omitir si está en el buffer de 2 horas
         if (slotTime.isBefore(minimumSlotTime)) {
           slotTime.add(intervalMinutes, 'minutes');
           continue;
         }
 
-        // 2. Omitir si está en un descanso
         let isInBreak = false;
         if (breakTimes && breakTimes.length > 0) {
           for (const breakTime of breakTimes) {
@@ -1405,17 +1511,11 @@ Pago de pensión por $290,000 COP\n`,
           continue;
         }
 
-        // --- 3. NUEVO: Omitir si está OCUPADO en DynamoDB ---
         if (busySlots.has(slotId)) {
-          this.logger.log(`[DYN] Slot Ocupado (DynamoDB): ${slotId}`);
           slotTime.add(intervalMinutes, 'minutes');
           continue;
         }
 
-        // --- 4. TODO: Omitir si está OCUPADO en Google Calendar ---
-        // if (config.tool === 'google_calendar') { ... }
-
-        // 5. Si el slot es válido, lo agregamos
         availableSlots.push({
           id: slotId,
           title: slotTime.clone().locale('es').format('ddd MMM DD YYYY HH:mm'),
@@ -1426,9 +1526,6 @@ Pago de pensión por $290,000 COP\n`,
       currentDate.add(1, 'day');
     }
 
-    this.logger.log(
-      `[DYN] Slots de cita generados (filtrados): ${availableSlots.length}`,
-    );
     return availableSlots;
   }
 
@@ -1477,6 +1574,7 @@ Pago de pensión por $290,000 COP\n`,
    * Lógica de negocio específica para crear un evento en Google Calendar
    * Y guardar un registro en DynamoDB.
    */
+
   private async _createCalendarEvent(
     newSessionData: any,
     flowNavigate: any,
@@ -1489,74 +1587,145 @@ Pago de pensión por $290,000 COP\n`,
     const appointmentScreenKey = Object.keys(screenConfig).find(
       (key) => screenConfig[key].type === 'appointmentNode',
     );
-    if (!appointmentScreenKey) {
-      this.logger.log(
-        '[DYN] Flujo finalizado. No se encontró appointmentNode.',
+    if (!appointmentScreenKey) return;
+
+    const apptConfig = screenConfig[appointmentScreenKey].config;
+    const tool = apptConfig.tool;
+    const selectedSlot = newSessionData.date;
+
+    // ✅ 1. CARGAMOS EL MAPA DE RECURSOS (La configuración confiable)
+    const resourceMapping = apptConfig.resourceMapping || {};
+
+    if (!selectedSlot || tool !== 'google_calendar') {
+      this.logger.warn(
+        `[DYN] Flow finalizado sin slot o herramienta incorrecta.`,
       );
       return;
     }
 
-    this.logger.log(
-      `[DYN] Este flujo contiene un 'appointmentNode' (${appointmentScreenKey}). Intentando agendar.`,
-    );
+    const [date, time] = selectedSlot.split(' ');
+    let title = apptConfig.appointmentDescription || 'Cita Agendada';
+    const duration = apptConfig.intervalMinutes || 60;
 
-    const apptConfig = screenConfig[appointmentScreenKey].config;
-    const tool = apptConfig.tool;
-    const selectedSlot = newSessionData.date; // Ej: "2025-11-17 10:00"
+    // --- VARIABLES POR DEFECTO ---
+    let selectedProfessionalId = 'any_professional';
+    let professionalDisplayName = 'Profesional Asignado';
 
-    if (selectedSlot && tool === 'google_calendar') {
-      this.logger.log(
-        `[DYN] Slot seleccionado: ${selectedSlot}. Usando ${tool}.`,
-      );
+    // --- 2. VALIDACIÓN ESTRICTA: BUSCAR SI EL DATO ENTRANTE EXISTE EN EL MAPA ---
 
-      const [date, time] = selectedSlot.split(' ');
-      let title = apptConfig.appointmentDescription || 'Cita Agendada';
-      const duration = apptConfig.intervalMinutes || 60;
+    // Recorremos todos los valores que envió el usuario (respuestas del formulario)
+    const sessionValues = Object.values(newSessionData);
+    let foundMapping: any = null;
 
-      title = title.replace(/\$\{data\.(\w+)\}/g, (match, key) => {
-        return newSessionData[key] ? String(newSessionData[key]) : match;
-      });
-      title = title.replace(/\$\{user\.phone\}/g, userNumber);
-
-      const guestEmail = newSessionData.email ? [newSessionData.email] : [];
-      const guestEmailString = guestEmail.length > 0 ? guestEmail[0] : null;
-
-      try {
-        // 1. Crear en Google Calendar
-        const googleEvent: any = await this.calendarService.createEvent(
-          numberId,
-          date,
-          time,
-          title,
-          duration,
-          guestEmail,
-        );
-
-        const googleEventId = googleEvent?.id || 'unknown';
-        this.logger.log(
-          `[DYN] Cita creada en Google Calendar (ID: ${googleEventId}).`,
-        );
-
-        // --- 2. NUEVO: Guardar en DynamoDB ---
-        await this.dynamoService.saveAppointment(
-          numberId,
-          selectedSlot, // El ID "YYYY-MM-DD HH:mm"
-          userNumber,
-          title,
-          duration,
-          guestEmailString,
-          googleEventId,
-        );
-        // --- FIN DE GUARDADO ---
-      } catch (calendarError) {
-        this.logger.error(
-          `[DYN] ¡FALLO al crear cita en Google Calendar!`,
-          calendarError,
-        );
+    for (const value of sessionValues) {
+      // Solo nos interesan los strings (porque los IDs de opción son strings)
+      if (typeof value === 'string') {
+        // 🔍 VALIDACIÓN CLAVE: ¿Este valor existe como LLAVE en mi mapa?
+        if (resourceMapping[value]) {
+          // ¡SÍ EXISTE! Es un ID válido (ej: opcion_1763...) configurado en el nodo.
+          foundMapping = resourceMapping[value];
+          this.logger.log(
+            `[DYN] Opción válida encontrada en configuración: ${value}`,
+          );
+          break; // Dejamos de buscar, ya encontramos al profesional.
+        }
       }
+    }
+
+    // Si la validación pasó, usamos los datos del mapa
+    if (foundMapping) {
+      selectedProfessionalId = foundMapping.id; // Ej: "henry_arevalo"
+      professionalDisplayName = foundMapping.nombre; // Ej: "Henry Arevalo"
     } else {
       this.logger.warn(
-        `[DYN] Flow finalizado, pero 'selectedSlot' no se encontró o 'tool' no es 'google_calendar'.`,
+        `[DYN] Ningún valor de la sesión coincide con una opción válida en resourceMapping. Usando asignación automática.`,
+      );
+    }
+
+    // --- 3. LÓGICA ALEATORIA (Si quedó en 'any_professional') ---
+    if (selectedProfessionalId === 'any_professional') {
+      const allResources = Object.values(resourceMapping) as any[];
+      // Filtramos para obtener solo los IDs reales
+      const allResourceIds = allResources
+        .map((r) => r.id)
+        .filter((id) => id !== 'any_professional');
+
+      const occupation =
+        this.flowSessions.slotOccupation?.[selectedSlot] || new Set();
+
+      // Disponibles = Total - Ocupados
+      const availableResourceIds = allResourceIds.filter(
+        (id) => !occupation.has(id),
+      );
+
+      if (availableResourceIds.length > 0) {
+        const randomIndex = Math.floor(
+          Math.random() * availableResourceIds.length,
+        );
+        selectedProfessionalId = availableResourceIds[randomIndex];
+
+        // Recuperar nombre bonito para el título
+        const foundResource = allResources.find(
+          (r) => r.id === selectedProfessionalId,
+        );
+        if (foundResource) {
+          professionalDisplayName = foundResource.nombre;
+        }
+
+        this.logger.log(
+          `[DYN] Asignación abierta. Recurso seleccionado al azar: ${selectedProfessionalId}`,
+        );
+      } else {
+        this.logger.error(
+          '[DYN] Error crítico: Slot marcado como disponible pero sin recursos libres al momento de agendar.',
+        );
+        return;
+      }
+    }
+
+    // --- 4. TÍTULO Y GUARDADO ---
+    title = title.replace(/\$\{data\.(\w+)\}/g, (match, key) => {
+      return newSessionData[key] ? String(newSessionData[key]) : match;
+    });
+    title = title.replace(/\$\{user\.phone\}/g, userNumber);
+
+    if (selectedProfessionalId !== 'any_professional') {
+      title += ` Profesional: ${professionalDisplayName}`;
+    }
+
+    const guestEmail = newSessionData.email ? [newSessionData.email] : [];
+    const guestEmailString = guestEmail.length > 0 ? guestEmail[0] : null;
+
+    try {
+      const googleEvent: any = await this.calendarService.createEvent(
+        numberId,
+        date,
+        time,
+        title,
+        duration,
+        guestEmail,
+      );
+
+      const googleEventId = googleEvent?.id || 'unknown';
+
+      await this.dynamoService.saveAppointment(
+        numberId,
+        selectedSlot,
+        userNumber,
+        title,
+        duration,
+        guestEmailString,
+        googleEventId,
+        selectedProfessionalId, // Guardamos el slug validado o generado
+      );
+
+      this.logger.log(
+        `[DYN] Cita guardada correctamente. ID: ${selectedProfessionalId}`,
+      );
+    } catch (calendarError) {
+      this.logger.error(
+        `[DYN] ¡FALLO al crear cita en Google Calendar!`,
+        calendarError,
       );
     }
   }
