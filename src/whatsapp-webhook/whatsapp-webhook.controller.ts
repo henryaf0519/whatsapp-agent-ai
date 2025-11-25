@@ -522,7 +522,6 @@ export class WhatsappWebhookController implements OnModuleDestroy {
       return;
     }
 
-    this.logger.debug('Processing message', JSON.stringify(message, null, 2));
     const messageContent = await this.validateMessage(message, businessId);
     if (!messageContent) {
       return;

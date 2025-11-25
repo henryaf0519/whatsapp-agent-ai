@@ -1348,26 +1348,31 @@ export class DynamoService {
    */
   async saveAppointment(
     numberId: string,
-    slotId: string, // Ej: "2025-11-17 10:00"
+    slotId: string,
     userNumber: string,
     title: string,
     duration: number,
     guestEmail: string | null,
     googleEventId: string,
+    professionalId: string = 'any_professional',
   ): Promise<any> {
+    // Construimos la SK compuesta para soportar múltiples citas a la misma hora
+    const skComposite = `SLOT#${slotId}#${professionalId}`;
+
     const item = {
-      PK: `APPT#${numberId}`, // Partición por cliente
-      SK: `SLOT#${slotId}`, // Clave de ordenación por fecha/hora
+      PK: `APPT#${numberId}`,
+      SK: skComposite,
       userNumber: userNumber,
       title: title,
       durationMinutes: duration,
       guestEmail: guestEmail || null,
       googleEventId: googleEventId,
+      professionalId: professionalId,
       createdAt: new Date().toISOString(),
     };
 
     const command = new PutCommand({
-      TableName: 'Appointments', // <-- (Asegúrate de que esta tabla exista en tu DynamoDB)
+      TableName: 'Appointments',
       Item: item,
     });
 
@@ -1388,7 +1393,7 @@ export class DynamoService {
     numberId: string,
     startDate: string, // Formato "YYYY-MM-DD HH:mm"
     endDate: string, // Formato "YYYY-MM-DD HH:mm"
-  ): Promise<Set<string>> {
+  ): Promise<any[]> {
     const command = new QueryCommand({
       TableName: 'Appointments',
       KeyConditionExpression: 'PK = :pk AND SK BETWEEN :start AND :end',
@@ -1406,21 +1411,40 @@ export class DynamoService {
       const { Items } = await this.docClient.send(command);
 
       if (!Items || Items.length === 0) {
-        return new Set<string>(); // No hay citas ocupadas
+        return []; // No hay citas ocupadas
       }
 
-      // Devolvemos un Set (para búsqueda rápida) de los slots ocupados
-      // Ej: Set { "2025-11-17 10:00", "2025-11-17 14:00" }
-      const busySlots = new Set(
-        Items.map((item) => item.SK.replace('SLOT#', '')),
-      );
-      this.logger.log(
-        `Encontrados ${busySlots.size} slots ocupados en DynamoDB.`,
-      );
-      return busySlots;
+      return Items || [];
     } catch (error) {
       this.logger.error('Error al obtener rango de citas de DynamoDB', error);
-      return new Set<string>(); // Devolver vacío en caso de error
+      return [];
+    }
+  }
+
+  /**
+   * Obtiene una lista de slots de citas YA OCUPADOS para un cliente
+   * dentro de un rango de fechas.
+   */
+  async getAppointmentsByNumberID(numberId: string): Promise<any[]> {
+    const command = new QueryCommand({
+      TableName: 'Appointments',
+      KeyConditionExpression: 'PK = :pk', // Solo consultamos por Partition Key
+      ExpressionAttributeValues: {
+        ':pk': `APPT#${numberId}`,
+      },
+    });
+
+    try {
+      this.logger.log(`Buscando citas para ${numberId}`);
+      const { Items } = await this.docClient.send(command);
+
+      if (!Items || Items.length === 0) {
+        return []; // ✅ CORRECCIÓN: Devolver array vacío, no un Set
+      }
+      return Items;
+    } catch (error) {
+      this.logger.error('Error al obtener rango de citas de DynamoDB', error);
+      return []; // ✅ Devolver array vacío en error
     }
   }
 
