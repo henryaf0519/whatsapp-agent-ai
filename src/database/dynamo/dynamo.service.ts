@@ -1346,6 +1346,9 @@ export class DynamoService {
    * PK: APPT#[numberId]
    * SK: SLOT#[YYYY-MM-DD HH:mm]
    */
+  // En src/database/dynamo/dynamo.service.ts
+
+  // 1. Modificar saveAppointment
   async saveAppointment(
     numberId: string,
     slotId: string,
@@ -1377,7 +1380,7 @@ export class DynamoService {
     });
 
     try {
-      this.logger.log(`Guardando cita en DynamoDB: ${item.PK} / ${item.SK}`);
+      this.logger.log(`Guardando cita: ${item.PK} / ${item.SK}`);
       return await this.docClient.send(command);
     } catch (error) {
       this.logger.error('Error al guardar cita en DynamoDB', error);
@@ -1385,10 +1388,8 @@ export class DynamoService {
     }
   }
 
-  /**
-   * Obtiene una lista de slots de citas YA OCUPADOS para un cliente
-   * dentro de un rango de fechas.
-   */
+  // Esta función ahora debe devolver más información, no solo un Set de fechas,
+  // sino un mapa o array de objetos para saber QUIÉN está ocupado.
   async getAppointmentsForRange(
     numberId: string,
     startDate: string, // Formato "YYYY-MM-DD HH:mm"
@@ -1399,15 +1400,12 @@ export class DynamoService {
       KeyConditionExpression: 'PK = :pk AND SK BETWEEN :start AND :end',
       ExpressionAttributeValues: {
         ':pk': `APPT#${numberId}`,
-        ':start': `SLOT#${startDate}`,
-        ':end': `SLOT#${endDate}`,
+        ':start': `SLOT#${startDate}`, // Dynamo busca alfabéticamente, funcionará bien
+        ':end': `SLOT#${endDate}~`, // El ~ asegura que incluya sufijos
       },
     });
 
     try {
-      this.logger.log(
-        `Buscando citas para ${numberId} entre ${startDate} y ${endDate}`,
-      );
       const { Items } = await this.docClient.send(command);
 
       if (!Items || Items.length === 0) {
@@ -1439,12 +1437,12 @@ export class DynamoService {
       const { Items } = await this.docClient.send(command);
 
       if (!Items || Items.length === 0) {
-        return []; // ✅ CORRECCIÓN: Devolver array vacío, no un Set
+        return [];
       }
       return Items;
     } catch (error) {
       this.logger.error('Error al obtener rango de citas de DynamoDB', error);
-      return []; // ✅ Devolver array vacío en error
+      return [];
     }
   }
 

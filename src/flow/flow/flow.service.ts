@@ -1,4 +1,8 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
+<<<<<<< HEAD
+=======
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
+>>>>>>> a1024dd7971343af79b8a7b9f3867ff3aef51f2d
 /* eslint-disable no-case-declarations */
 /* eslint-disable @typescript-eslint/restrict-template-expressions */
 /* eslint-disable @typescript-eslint/await-thenable */
@@ -1290,9 +1294,12 @@ Pago de pensión por $290,000 COP\n`,
    * Maneja la lógica de los dataSourceTriggers del __SCREEN_CONFIG__
    * Esta función actúa como un enrutador para llamar a la lógica correcta.
    */
+  /**
+   * Maneja la lógica de los dataSourceTriggers del __SCREEN_CONFIG__
+   */
   private async _handleDataSourceTrigger(
     trigger: string,
-    config: any,
+    config: any, // Aquí viene la config del nodo (incluyendo resourceMapping)
     numberId: string,
     data: any,
   ): Promise<Record<string, any>> {
@@ -1388,17 +1395,14 @@ Pago de pensión por $290,000 COP\n`,
       .endOf('day')
       .format('YYYY-MM-DD HH:mm');
 
-    // 2. Obtener citas crudas de DynamoDB
     const rawAppointments = await this.dynamoService.getAppointmentsForRange(
       numberId,
       queryStartDate,
       queryEndDate,
     );
-
-    // 3. Crear Set de Slots Ocupados (FILTRADO INTELIGENTE)
     const busySlots = new Set<string>();
 
-    // Mapa para contar ocupación por slot en modo "Cualquiera"
+
     const slotOccupationMap: Record<string, Set<string>> = {};
 
     // Iteramos sobre lo que devuelve getAppointmentsForRange (que ahora devuelve un Set de strings 'SK')
@@ -1662,6 +1666,7 @@ Pago de pensión por $290,000 COP\n`,
         this.logger.warn(
           `[DYN] ⚠️ No se encontró match en el mapping. Se usará lógica 'any_professional'.`,
         );
+        return;
       }
     }
 
