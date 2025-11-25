@@ -86,38 +86,40 @@ export class CalendarService {
    * para saber en qué calendario crear el evento.
    */
   async createEvent(
-    numberId: string, // <-- PARÁMETRO REQUERIDO: El ID del cliente (para buscar su token)
+    numberId: string,
     date: string,
     time: string,
     title: string,
     durationMinutes = 60,
     guestEmails: string[] = [],
-  ): Promise<unknown> {
+  ): Promise<any> {
+    // <--- Cambiamos retorno a 'any' para acceder a propiedades
     this.logger.log(
       `Solicitud para crear evento en calendario del cliente: ${numberId}`,
     );
+
     const { client, email } = await this.createClientForUser(numberId);
     const res = await client.getAccessToken();
     const token = res.token;
 
     if (!token) {
-      this.logger.error(`No se pudo obtener access token para ${numberId}`);
       throw new InternalServerErrorException('Error obteniendo access token');
     }
 
     const start = new Date(`${date}T${time}-05:00`);
-
     const end = new Date(start.getTime() + durationMinutes * 60000);
 
-    const body: {
-      summary: string;
-      start: { dateTime: string; timeZone: string };
-      end: { dateTime: string; timeZone: string };
-      attendees?: { email: string }[];
-    } = {
+    const body: any = {
       summary: title,
       start: { dateTime: start.toISOString(), timeZone: 'America/Bogota' },
       end: { dateTime: end.toISOString(), timeZone: 'America/Bogota' },
+      // ✅ SOLICITAR GOOGLE MEET
+      conferenceData: {
+        createRequest: {
+          requestId: `req-${Date.now()}`, // ID único para la petición
+          conferenceSolutionKey: { type: 'hangoutsMeet' },
+        },
+      },
     };
 
     if (guestEmails.length) {
@@ -125,7 +127,8 @@ export class CalendarService {
     }
 
     const calendarId = email;
-    const url = `${this.baseUrl}/calendars/${calendarId}/events?sendUpdates=all`;
+    // ✅ AGREGAR 'conferenceDataVersion=1' PARA QUE GOOGLE CREE EL LINK
+    const url = `${this.baseUrl}/calendars/${calendarId}/events?conferenceDataVersion=1&sendUpdates=all`;
 
     try {
       const { data } = await axios.post(url, body, {
@@ -135,25 +138,19 @@ export class CalendarService {
         },
       });
       this.logger.log(
-        `Evento creado exitosamente en el calendario de ${numberId}`,
+        `Evento creado exitosamente. ID: ${data.id}, Link: ${data.hangoutLink || 'No generado'}`,
       );
-      return data;
+      return data; // Retornamos todo el objeto para sacar el link después
     } catch (err) {
       if (axios.isAxiosError(err)) {
         this.logger.error(
-          `Google Calendar API error ${err.response?.status} para ${numberId}`,
+          `Google Calendar API error ${err.response?.status}`,
           JSON.stringify(err.response?.data),
         );
         throw new InternalServerErrorException(
-          `No se pudo crear evento (${err.response?.status}): ${
-            (err.response?.data as any)?.error?.message || err.message
-          }`,
+          `No se pudo crear evento: ${(err.response?.data as any)?.error?.message || err.message}`,
         );
       }
-      this.logger.error(
-        `Error inesperado creando evento para ${numberId}`,
-        err,
-      );
       throw new InternalServerErrorException('Error inesperado creando evento');
     }
   }

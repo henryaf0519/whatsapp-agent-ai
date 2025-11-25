@@ -591,7 +591,7 @@ export class WhatsappService {
       );
 
       // 3. CONSTRUCCIÓN DEL TOKEN
-      const flowToken = `token_${to}_${businessId}_${trigger.flow_id}_${Date.now()}`;
+      const flowToken = `${name}_${to}_${businessId}_${trigger.flow_id}_${Date.now()}`;
 
       const headerText = trigger.header_text
         ? trigger.header_text.replace(/nombre/gi, name)

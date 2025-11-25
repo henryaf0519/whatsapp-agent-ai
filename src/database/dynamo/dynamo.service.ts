@@ -783,7 +783,6 @@ export class DynamoService {
 
     try {
       const result = await this.docClient.send(command);
-      this.logger.debug('result: ', JSON.stringify(result));
       return result.Item;
     } catch (error) {
       this.logger.error(
@@ -1150,7 +1149,6 @@ export class DynamoService {
     });
 
     try {
-      this.logger.debug(`Buscando definición de flujo: ${numberId}/${flowId}`);
       const result = await this.docClient.send(command);
 
       if (!result.Item) {
@@ -1159,8 +1157,6 @@ export class DynamoService {
         );
         throw new Error('Definición de flujo no encontrada');
       }
-
-      this.logger.debug(`Definición de flujo encontrada.`);
       return result.Item; // Devuelve el ítem completo (incluye 'flow_definition')
     } catch (error) {
       this.logger.error(
@@ -1213,10 +1209,6 @@ export class DynamoService {
 
     try {
       const response = await this.docClient.send(command);
-      this.logger.log(
-        `Obtenidos ${response.Items?.length || 0} disparadores para ${numberId}`,
-      );
-      this.logger.debug(JSON.stringify(response.Items));
       if (!response.Items || (response.Items as any[]).length === 0) {
         return null;
       }
@@ -1348,7 +1340,10 @@ export class DynamoService {
    */
   // En src/database/dynamo/dynamo.service.ts
 
-  // 1. Modificar saveAppointment
+  /**
+   * Guarda un registro de una cita agendada en DynamoDB.
+   * Ahora incluye Nombre del Usuario y Link de Reunión.
+   */
   async saveAppointment(
     numberId: string,
     slotId: string,
@@ -1358,8 +1353,9 @@ export class DynamoService {
     guestEmail: string | null,
     googleEventId: string,
     professionalId: string = 'any_professional',
+    userName: string = '', // <--- ✅ NUEVO
+    meetingLink: string = '', // <--- ✅ NUEVO
   ): Promise<any> {
-    // Construimos la SK compuesta para soportar múltiples citas a la misma hora
     const skComposite = `SLOT#${slotId}#${professionalId}`;
 
     const item = {
@@ -1371,6 +1367,8 @@ export class DynamoService {
       guestEmail: guestEmail || null,
       googleEventId: googleEventId,
       professionalId: professionalId,
+      userName: userName,
+      meetingLink: meetingLink,
       createdAt: new Date().toISOString(),
     };
 
@@ -1380,7 +1378,7 @@ export class DynamoService {
     });
 
     try {
-      this.logger.log(`Guardando cita: ${item.PK} / ${item.SK}`);
+      this.logger.log(`Guardando cita en DynamoDB: ${item.PK} / ${item.SK}`);
       return await this.docClient.send(command);
     } catch (error) {
       this.logger.error('Error al guardar cita en DynamoDB', error);

@@ -1,8 +1,4 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
-<<<<<<< HEAD
-=======
-/* eslint-disable @typescript-eslint/no-unsafe-argument */
->>>>>>> a1024dd7971343af79b8a7b9f3867ff3aef51f2d
 /* eslint-disable no-case-declarations */
 /* eslint-disable @typescript-eslint/restrict-template-expressions */
 /* eslint-disable @typescript-eslint/await-thenable */
@@ -543,7 +539,8 @@ Pago de pensión por $290,000 COP\n`,
     }
 
     // 2. Extraer identificadores y cargar el JSON del flujo
-    const { numberId, userNumber, flow_id } = this._parseFlowToken(flow_token);
+    const { numberId, userNumber, flow_id, userName } =
+      this._parseFlowToken(flow_token);
     if (!flow_id || !numberId || !userNumber) {
       this.logger.error(
         `[DYN] flow_token o flow_id faltantes. Token: ${flow_token}, ID: ${flow_id}`,
@@ -562,6 +559,7 @@ Pago de pensión por $290,000 COP\n`,
     }
 
     const currentSessionData = this.flowSessions[flow_token]?.data || {};
+    currentSessionData.userName = userName;
     const newSessionData = { ...currentSessionData, ...data };
     this.flowSessions[flow_token] = {
       timestamp: Date.now(),
@@ -677,9 +675,11 @@ Pago de pensión por $290,000 COP\n`,
     numberId: string;
     flow_id: string;
     userNumber: string;
+    userName: string;
   } {
     try {
       const parts = flow_token.split('_');
+      const userName = parts[0];
       const userNumber = parts[1];
       const numberId = parts[2]; // businessId
       const flow_id = parts[3];
@@ -687,7 +687,7 @@ Pago de pensión por $290,000 COP\n`,
       if (!userNumber || !numberId || !flow_id) {
         throw new Error('Formato de flow_token inválido');
       }
-      return { numberId, userNumber, flow_id };
+      return { numberId, userNumber, flow_id, userName };
     } catch (error) {
       this.logger.error(`Error parseando flow_token: ${flow_token}`, error);
       throw new Error('flow_token inválido');
@@ -1187,7 +1187,7 @@ Pago de pensión por $290,000 COP\n`,
       );
     }
 
-    const flowToken = `token_${to}_${number_id}_${flowId}_${Date.now()}`;
+    const flowToken = `nombre_${to}_${number_id}_${flowId}_${Date.now()}`;
 
     const payload = {
       messaging_product: 'whatsapp',
@@ -1402,7 +1402,6 @@ Pago de pensión por $290,000 COP\n`,
     );
     const busySlots = new Set<string>();
 
-
     const slotOccupationMap: Record<string, Set<string>> = {};
 
     // Iteramos sobre lo que devuelve getAppointmentsForRange (que ahora devuelve un Set de strings 'SK')
@@ -1612,7 +1611,7 @@ Pago de pensión por $290,000 COP\n`,
     const tool = apptConfig.tool;
     const selectedSlot = newSessionData.date;
 
-    // 1. CARGAR MAPA Y VALIDAR
+    // 1. Cargar configuración de recursos
     const resourceMapping = apptConfig.resourceMapping || {};
     const hasResources = Object.keys(resourceMapping).length > 0;
 
@@ -1626,57 +1625,33 @@ Pago de pensión por $290,000 COP\n`,
     const [date, time] = selectedSlot.split(' ');
     let title = apptConfig.appointmentDescription || 'Cita Agendada';
     const duration = apptConfig.intervalMinutes || 60;
+    const userName = newSessionData.userName || '';
 
-    // Variables por defecto
+    // Variables por defecto para el profesional
     let selectedProfessionalId = 'any_professional';
     let professionalDisplayName = '';
 
-    // --- 2. INTENTAR DETECTAR SELECCIÓN (CON DEBUGGING) ---
+    // --- LÓGICA DE SELECCIÓN DE PROFESIONAL ---
     if (hasResources) {
       const sessionValues = Object.values(newSessionData);
       let foundMapping: any = null;
 
-      // DEBUG: Ver qué valores tenemos y qué llaves esperamos
-      // (Esto te ayudará a ver en la consola por qué no coinciden)
-      this.logger.debug(
-        `[DYN] Valores en Sesión: ${JSON.stringify(sessionValues)}`,
-      );
-      this.logger.debug(
-        `[DYN] Llaves en Mapping: ${JSON.stringify(Object.keys(resourceMapping))}`,
-      );
-
       for (const value of sessionValues) {
-        // Aseguramos que sea string y quitamos espacios por si acaso
-        if (typeof value === 'string') {
-          const cleanValue = value.trim();
-          if (resourceMapping[cleanValue]) {
-            foundMapping = resourceMapping[cleanValue];
-            this.logger.log(
-              `[DYN] ✅ Match encontrado: ${cleanValue} -> ${foundMapping.id}`,
-            );
-            break;
-          }
+        if (typeof value === 'string' && resourceMapping[value]) {
+          foundMapping = resourceMapping[value];
+          break;
         }
       }
 
       if (foundMapping) {
         selectedProfessionalId = foundMapping.id;
         professionalDisplayName = foundMapping.nombre;
-      } else {
-        this.logger.warn(
-          `[DYN] ⚠️ No se encontró match en el mapping. Se usará lógica 'any_professional'.`,
-        );
-        return;
       }
     }
 
-    // --- 3. LÓGICA ALEATORIA / AGENDA GENERAL ---
-
-    // CASO A: Es 'any_professional' Y tenemos recursos configurados (Modo Aleatorio)
+    // --- LÓGICA ALEATORIA / AGENDA GENERAL ---
     if (selectedProfessionalId === 'any_professional' && hasResources) {
       const allResources = Object.values(resourceMapping) as any[];
-
-      // IDs reales para elegir (excluyendo el ID 'any_professional' si existe en el mapa)
       const allResourceIds = allResources
         .map((r) => r.id)
         .filter((id) => id !== 'any_professional');
@@ -1693,54 +1668,51 @@ Pago de pensión por $290,000 COP\n`,
         );
         selectedProfessionalId = availableResourceIds[randomIndex];
 
-        // Recuperar nombre
         const foundResource = allResources.find(
           (r) => r.id === selectedProfessionalId,
         );
         if (foundResource) professionalDisplayName = foundResource.nombre;
 
         this.logger.log(
-          `[DYN] Asignación abierta/Fallback. Recurso seleccionado: ${selectedProfessionalId}`,
+          `[DYN] Asignación abierta. Recurso seleccionado al azar: ${selectedProfessionalId}`,
         );
       } else {
-        // Si no hay nadie libre, PERO el usuario había escogido a alguien específico y falló el match,
-        // o si era 'Cualquiera' y todo está lleno.
-        // INTENTO DE RECUPERACIÓN: Si no hay disponibles según el mapa,
-        // asumimos que es un error de ocupación y forzamos al primero (o lanzamos error).
-
-        // Opción segura: Loguear error pero permitir guardar como 'any_professional' para no perder la venta
         this.logger.error(
           '[DYN] Error: Slot marcado disponible pero sin recursos libres. Guardando como genérico.',
         );
         selectedProfessionalId = 'any_professional';
-        professionalDisplayName = 'Equipo';
       }
-    }
-    // CASO B: No hay recursos configurados (Agenda General Simple)
-    else if (!hasResources) {
+    } else if (!hasResources) {
       this.logger.log(
-        `[DYN] Agenda General (Sin mapping). Guardando como 'any_professional'.`,
+        `[DYN] Agenda General. Guardando como 'any_professional'.`,
       );
       selectedProfessionalId = 'any_professional';
     }
 
-    // --- 4. TÍTULO Y GUARDADO ---
+    // --- CONSTRUCCIÓN DEL TÍTULO ---
     title = title.replace(/\$\{data\.(\w+)\}/g, (match, key) => {
       return newSessionData[key] ? String(newSessionData[key]) : match;
     });
     title = title.replace(/\$\{user\.phone\}/g, userNumber);
 
+    // Agregar Nombre del Cliente al título (Opcional, pero recomendado)
+    if (userName) {
+      title += ` - ${userName}`;
+    }
+
+    // Agregar Nombre del Profesional al título
     if (
       selectedProfessionalId !== 'any_professional' &&
       professionalDisplayName
     ) {
-      title += ` Profesional: ${professionalDisplayName}`;
+      title += ` (Prof: ${professionalDisplayName})`;
     }
 
     const guestEmail = newSessionData.email ? [newSessionData.email] : [];
     const guestEmailString = guestEmail.length > 0 ? guestEmail[0] : null;
 
     try {
+      // 3. Crear en Google Calendar
       const googleEvent: any = await this.calendarService.createEvent(
         numberId,
         date,
@@ -1752,6 +1724,10 @@ Pago de pensión por $290,000 COP\n`,
 
       const googleEventId = googleEvent?.id || 'unknown';
 
+      // ✅ 4. OBTENER LINK DE MEET
+      const meetingLink = googleEvent.hangoutLink || googleEvent.htmlLink || '';
+
+      // ✅ 5. GUARDAR EN DYNAMO CON NOMBRE Y LINK
       await this.dynamoService.saveAppointment(
         numberId,
         selectedSlot,
@@ -1761,10 +1737,12 @@ Pago de pensión por $290,000 COP\n`,
         guestEmailString,
         googleEventId,
         selectedProfessionalId,
+        userName,
+        meetingLink,
       );
 
       this.logger.log(
-        `[DYN] Cita guardada correctamente. ID: ${selectedProfessionalId}`,
+        `[DYN] Cita guardada. Cliente: ${userName}, Profesional: ${selectedProfessionalId}, Link: ${meetingLink}`,
       );
     } catch (calendarError) {
       this.logger.error(

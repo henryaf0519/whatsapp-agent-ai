@@ -287,11 +287,6 @@ export class WhatsappWebhookController implements OnModuleDestroy {
         });
         return Promise.resolve({ type: 'unsupported' });
       }
-
-      this.logger.debug('Message is a text message', {
-        messageId: message.id,
-        body: textBody,
-      });
       return Promise.resolve({
         type: 'text',
         body: textBody,
@@ -527,11 +522,6 @@ export class WhatsappWebhookController implements OnModuleDestroy {
       return;
     }
 
-    this.logger.log('Processing message', {
-      businessId,
-      contactName,
-    });
-    // Validate message
     payload = this.createPayload(messageContent);
     this.logger.debug('Payload:', JSON.stringify(payload, null, 2));
 
