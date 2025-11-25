@@ -169,27 +169,21 @@ export class CalendarService {
 
       // 2. Transformar para el Frontend (FullCalendar)
       const formattedAppointments = rawAppointments.map((appt: any) => {
-        // El SK viene como: "SLOT#2025-11-25 14:00#henry_arevalo"
         const parts = appt.SK.split('#');
-
-        // Extraer fecha y hora: "2025-11-25 14:00"
         const datePart = parts[1];
-
-        // Convertir a ISO String compatible con FullCalendar: "2025-11-25T14:00:00"
-        // Reemplazamos el espacio por 'T' y agregamos segundos
         const isoDate = datePart ? datePart.replace(' ', 'T') + ':00' : null;
 
         return {
-          id: appt.googleEventId || appt.SK, // ID único
-          title: appt.title, // "Cita Agendada..."
-          date: isoDate, // ✅ Formato ISO correcto
-          professionalId: appt.professionalId || 'any_professional', // Para el color
-          userNumber: appt.userNumber, // Datos extra para el modal
+          id: appt.googleEventId || appt.SK,
+          title: appt.title,
+          date: isoDate,
+          professionalId: appt.professionalId || 'any_professional',
+          userNumber: appt.userNumber,
           guestEmail: appt.guestEmail,
+          userName: appt.userName || '',
+          meetingLink: appt.meetingLink || '',
         };
       });
-
-      // Filtrar si alguno quedó con fecha nula (por seguridad)
       return formattedAppointments.filter((a) => a.date !== null);
     } catch (error) {
       this.logger.error(
