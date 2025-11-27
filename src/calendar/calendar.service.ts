@@ -129,6 +129,8 @@ export class CalendarService {
       }));
     }
 
+    this.logger.log('body calendar: ' + JSON.stringify(body));
+
     const calendarId = email;
     // ✅ AGREGAR 'conferenceDataVersion=1' PARA QUE GOOGLE CREE EL LINK
     const url = `${this.baseUrl}/calendars/${calendarId}/events?conferenceDataVersion=1&sendUpdates=all`;
