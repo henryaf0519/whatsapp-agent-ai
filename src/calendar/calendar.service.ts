@@ -160,6 +160,95 @@ export class CalendarService {
     }
   }
 
+  async createAppointmentFromDashboard(
+    numberId: string,
+    body: {
+      date: string;
+      time: string;
+      stylistId: string;
+      stylistName: string;
+      clientEmail: string;
+      clientName: string;
+      clientPhone: string;
+    },
+  ) {
+    const {
+      date,
+      time,
+      stylistId,
+      stylistName,
+      clientEmail,
+      clientName,
+      clientPhone,
+    } = body;
+
+    const duration = 60;
+
+    // 1. FORMATEO EXACTO DEL TÍTULO
+    // Ejemplo: "Cita Bloom Beauty Salon - Henry (Prof: Over Otalora)"
+    const title = `Cita Bloom Beauty Salon - ${clientName} (Prof: ${stylistName})`;
+
+    // 2. FORMATEO DEL TELÉFONO (userNumber)
+    // Debe quedar como "573196372542" (sin el +)
+    let userNumber = clientPhone.replace(/\D/g, ''); // Quita espacios, +, guiones
+    if (userNumber.startsWith('57') && userNumber.length > 10) {
+      // Ya tiene el 57, lo dejamos así
+    } else if (userNumber.length === 10) {
+      // Es un cel colombiano sin indicativo, le ponemos el 57
+      userNumber = `57${userNumber}`;
+    }
+    // Si no cumple ninguna, se va como está (ej. número internacional)
+
+    try {
+      // 3. Crear evento en Google Calendar
+      const googleEvent = await this.createEvent(
+        numberId,
+        date,
+        time,
+        title,
+        duration,
+        [clientEmail],
+      );
+
+      const meetingLink = googleEvent.hangoutLink || '';
+      const googleEventId = googleEvent.id;
+
+      // 4. PREPARAR EL SLOT
+      // En tu ejemplo de Dynamo: SLOT#2025-12-02 18:00#over_otalora
+      // Normalmente 'saveAppointment' recibe la fecha base ("2025-12-02 18:00")
+      // y el professionalId ("over_otalora") y los une.
+      // Pasamos la fecha base limpia.
+      const selectedSlot = `${date} ${time}`;
+
+      this.logger.log(
+        `Guardando cita idéntica a WA. Slot: ${selectedSlot}, User: ${userNumber}`,
+      );
+
+      // 5. GUARDAR EN DYNAMO
+      await this.dynamoService.saveAppointment(
+        numberId, // PK (APPT#...) lo maneja el servicio internamente con este ID
+        selectedSlot, // Fecha base para el SK
+        userNumber, // Teléfono con formato 57...
+        title,
+        duration,
+        clientEmail,
+        googleEventId,
+        stylistId, // "over_otalora" (Se usará para armar el SK final)
+        clientName, // "Henry"
+        meetingLink,
+      );
+
+      return {
+        success: true,
+        message: 'Cita creada correctamente',
+        googleEvent,
+      };
+    } catch (error) {
+      this.logger.error('Error creando cita desde Dashboard', error);
+      throw new InternalServerErrorException('Error al procesar la cita');
+    }
+  }
+
   /**
    * para saber en qué calendario crear el evento.
    */
