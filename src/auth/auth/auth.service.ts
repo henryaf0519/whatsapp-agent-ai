@@ -78,10 +78,6 @@ export class AuthService {
           user.waba_id,
           user.whatsapp_token,
         );
-        this.logger.log(
-          'Plantillas obtenidas desde la API: ',
-          JSON.stringify(userTemplates, null, 2),
-        );
       } catch (error) {
         this.logger.error(
           `Falló la obtención de plantillas para ${user.email}`,
