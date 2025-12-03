@@ -9,6 +9,8 @@ import {
   HttpStatus,
   Post,
   Body,
+  Delete,
+  Param,
 } from '@nestjs/common';
 import { Response, Request } from 'express';
 import { CalendarService } from './calendar.service';
@@ -55,5 +57,25 @@ export class CalendarController {
       number_id,
       body,
     );
+  }
+
+  @Delete(':appointmentId') // 🆕 Endpoint: DELETE /appointments/:appointmentId
+  @UseGuards(AuthGuard('jwt'))
+  @HttpCode(HttpStatus.NO_CONTENT) // ✅ Respuesta 204: Petición exitosa sin contenido para devolver
+  async cancelAppointment(
+    @Req() req: Request,
+    @Param('appointmentId') appointmentId: string, // El ID de la cita (que debe ser el SK)
+  ) {
+    const { number_id } = req.user as {
+      number_id: string;
+    };
+    this.logger.log(
+      `Cancelando cita ${appointmentId} para usuario: ${number_id}`,
+    );
+
+    // 🚨 Asumimos que 'appointmentId' es el Sort Key (SK) de DynamoDB
+    await this.calendarService.cancelAppointment(number_id, appointmentId);
+
+    // Al no haber 'return', NestJS usa el HttpStatus.NO_CONTENT definido
   }
 }

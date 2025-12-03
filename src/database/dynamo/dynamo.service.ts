@@ -1353,8 +1353,8 @@ export class DynamoService {
     guestEmail: string | null,
     googleEventId: string,
     professionalId: string = 'any_professional',
-    userName: string = '', // <--- ✅ NUEVO
-    meetingLink: string = '', // <--- ✅ NUEVO
+    userName: string = '',
+    meetingLink: string = '',
   ): Promise<any> {
     const skComposite = `SLOT#${slotId}#${professionalId}`;
 
@@ -1383,6 +1383,68 @@ export class DynamoService {
     } catch (error) {
       this.logger.error('Error al guardar cita en DynamoDB', error);
       throw new Error('Error al guardar cita en DynamoDB');
+    }
+  }
+
+  /**
+   * Obtiene una cita específica de la tabla 'Appointments' usando PK y SK.
+   * * @param numberId La WABA ID o Business ID (parte de la PK: APPT#numberId).
+   * @param sk La Sort Key completa (SK: SLOT#YYYY-MM-DD HH:mm#professionalId).
+   * @returns El objeto de la cita o null si no se encuentra.
+   */
+  async getAppointmentBySK(numberId: string, sk: string): Promise<any> {
+    const pk = `APPT#${numberId}`;
+    this.logger.log(`[Dynamo] Consultando cita: PK=${pk} / SK=${sk}`);
+
+    const command = new GetCommand({
+      TableName: 'Appointments', // Debe coincidir con tu nombre de tabla
+      Key: {
+        PK: pk, // Partition Key
+        SK: sk, // Sort Key (el appointmentId del frontend)
+      },
+    });
+
+    try {
+      const response = await this.docClient.send(command);
+      return response.Item ?? null;
+    } catch (error) {
+      this.logger.error(
+        `Error al obtener cita ${sk} en DynamoDB`,
+        error,
+        'getAppointmentBySK',
+      );
+      // Mantenemos la convención de error del servicio
+      throw new Error('Error al consultar la cita de la base de datos');
+    }
+  }
+
+  /**
+   * Elimina un registro de cita de la tabla 'Appointments' usando PK y SK.
+   * @param numberId La WABA ID o Business ID (parte de la PK).
+   * @param sk La Sort Key completa (SLOT#YYYY-MM-DD HH:mm#professionalId).
+   */
+  async deleteAppointment(numberId: string, sk: string): Promise<void> {
+    const pk = `APPT#${numberId}`;
+    this.logger.log(`Eliminando cita con PK: ${pk} y SK: ${sk}`);
+
+    const command = new DeleteCommand({
+      TableName: 'Appointments', // Debe coincidir con la tabla usada en saveAppointment
+      Key: {
+        PK: pk,
+        SK: sk,
+      },
+    });
+
+    try {
+      await this.docClient.send(command);
+      this.logger.log(`Ítem eliminado: ${pk} / ${sk}`);
+    } catch (error) {
+      this.logger.error(
+        `Error al eliminar cita ${sk} en DynamoDB`,
+        error,
+        'deleteAppointment',
+      );
+      throw new Error('Error al eliminar la cita de la base de datos');
     }
   }
 
