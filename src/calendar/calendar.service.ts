@@ -268,17 +268,18 @@ export class CalendarService {
         const isoDate = datePart ? datePart.replace(' ', 'T') + ':00' : null;
 
         return {
-          id: appt.googleEventId || appt.SK,
+          id: appt.SK,
           title: appt.title,
-          date: isoDate,
+          start: isoDate,
           professionalId: appt.professionalId || 'any_professional',
           userNumber: appt.userNumber,
           guestEmail: appt.guestEmail,
           userName: appt.userName || '',
           meetingLink: appt.meetingLink || '',
+          googleEventId: appt.googleEventId,
         };
       });
-      return formattedAppointments.filter((a) => a.date !== null);
+      return formattedAppointments;
     } catch (error) {
       this.logger.error(
         `Error inesperado obteniendo eventos para ${numberId}`,
@@ -286,5 +287,56 @@ export class CalendarService {
       );
       return [];
     }
+  }
+
+  async cancelAppointment(numberId: string, sk: string): Promise<void> {
+    this.logger.log(
+      `Iniciando cancelación de cita para ${numberId} con SK: ${sk}`,
+    );
+
+    // 1. Obtener los detalles de la cita de DynamoDB
+    const appointment = await this.dynamoService.getAppointmentBySK(
+      numberId,
+      sk,
+    );
+
+    if (!appointment) {
+      throw new NotFoundException(`Cita no encontrada con ID: ${sk}`);
+    }
+
+    const googleEventId = appointment.googleEventId;
+
+    if (googleEventId) {
+      const { client, email: calendarId } =
+        await this.createClientForUser(numberId);
+
+      try {
+        this.logger.log(
+          `Eliminando evento Google: ${googleEventId} en calendario ${calendarId}`,
+        );
+
+        await axios.delete(
+          `${this.baseUrl}/calendars/${calendarId}/events/${googleEventId}`,
+          {
+            headers: {
+              // Obtener un nuevo token de acceso si el existente expiró
+              Authorization: `Bearer ${client.credentials.access_token || (await client.getAccessToken()).token}`,
+            },
+          },
+        );
+        this.logger.log(
+          `Evento ${googleEventId} eliminado de Google Calendar.`,
+        );
+      } catch (googleError: any) {
+        this.logger.error(
+          `Error al eliminar evento ${googleEventId} de Google Calendar. Se procede a eliminar de DynamoDB.`,
+          googleError.response?.data || googleError,
+        );
+      }
+    }
+
+    // 3. Eliminar el registro de DynamoDB
+    await this.dynamoService.deleteAppointment(numberId, sk);
+    this.logger.log(`Cita ${sk} eliminada de DynamoDB.`);
   }
 }

@@ -1312,20 +1312,32 @@ Pago de pensión por $290,000 COP\n`,
         let rawOptionFound = '';
 
         const resourceMapping = config.resourceMapping || {};
+        const allDataValues = Object.values(
+          this.flowSessions[data.flow_token]?.data || {},
+        );
 
-        // Recorremos TODOS los valores recibidos en 'data'.
-        // Meta envía algo como: { "seleccion_usuario": "opcion_1763..." }
-        const dataValues = Object.values(data);
-
-        for (const val of dataValues) {
-          // Verificamos si el valor es un string Y si existe como llave en nuestro mapa
+        for (const val of allDataValues) {
           if (typeof val === 'string') {
             const cleanVal = val.trim();
             if (resourceMapping[cleanVal]) {
-              // ¡ENCONTRADO! El usuario seleccionó esta opción
-              selectedProfessionalId = resourceMapping[cleanVal].id; // Ej: "henry_arevalo"
+
+              selectedProfessionalId = resourceMapping[cleanVal].id;
               rawOptionFound = cleanVal;
-              break; // Dejamos de buscar
+              break;
+            }
+          }
+        }
+
+        if (selectedProfessionalId === 'any_professional') {
+          const currentDataValues = Object.values(data);
+          for (const val of currentDataValues) {
+            if (typeof val === 'string') {
+              const cleanVal = val.trim();
+              if (resourceMapping[cleanVal]) {
+                selectedProfessionalId = resourceMapping[cleanVal].id;
+                rawOptionFound = cleanVal;
+                break;
+              }
             }
           }
         }
@@ -1338,7 +1350,7 @@ Pago de pensión por $290,000 COP\n`,
         const dates = await this._generateAvailableDates(
           config,
           numberId,
-          selectedProfessionalId, // Ahora sí lleva "henry_arevalo"
+          selectedProfessionalId,
           resourceMapping,
         );
         return { date: dates };
@@ -1421,35 +1433,37 @@ Pago de pensión por $290,000 COP\n`,
     const appointmentsArray = Array.from(rawAppointments);
 
     appointmentsArray.forEach((appt: any) => {
-      // El SK viene como "SLOT#2025-11-25 10:00#henry_arevalo" (o similar)
-      // O si rawAppointments es un Set de strings, necesitamos parsearlo.
-
-      // Si appt es un objeto completo de Dynamo:
       let slotTimeStr = '';
       let apptProfId = 'any_professional';
 
-      if (typeof appt === 'string') {
-        // Fallback por si acaso sigue llegando string
-        const parts = appt.split('#');
-        if (parts.length >= 2) slotTimeStr = parts[0]; // Ajustar según formato string
-      } else if (appt.SK) {
+      // Validación robusta usando el SK (ej: SLOT#2025-12-05 10:00#henry_arevalo)
+      if (appt && appt.SK && typeof appt.SK === 'string') {
         const parts = appt.SK.split('#');
+
+        // El slot de tiempo es la parte 1
         if (parts.length >= 2) {
-          slotTimeStr = parts[1]; // "2025-11-25 10:00"
+          slotTimeStr = parts[1];
         }
-        apptProfId = appt.professionalId || 'any_professional';
+
+        // El ID del profesional es la parte 2 (si existe)
+        if (parts.length > 2) {
+          apptProfId = parts[2];
+        } else {
+          // Fallback a la propiedad antigua si no está en el SK
+          apptProfId = appt.professionalId || 'any_professional';
+        }
       }
 
       if (!slotTimeStr) return;
 
-      // Lógica A: Usuario pidió un profesional ESPECÍFICO (ej: Henry)
+      // Lógica A: Usuario pidió un profesional ESPECÍFICO
       if (selectedProfessionalId !== 'any_professional') {
-        // Si la cita en BD es de Henry, bloqueamos el slot
+        // Si la cita en BD es del profesional seleccionado, bloqueamos el slot
         if (apptProfId === selectedProfessionalId) {
           busySlots.add(slotTimeStr);
         }
       }
-      // Lógica B: Usuario pidió CUALQUIERA (o Agenda General)
+      // Lógica B: Usuario pidió CUALQUIERA (Agenda General)
       else {
         if (!slotOccupationMap[slotTimeStr]) {
           slotOccupationMap[slotTimeStr] = new Set();
@@ -1602,16 +1616,47 @@ Pago de pensión por $290,000 COP\n`,
     const screenConfig = flowNavigate.__SCREEN_CONFIG__?.SCREENS;
     if (!screenConfig) return;
 
-    const appointmentScreenKey = Object.keys(screenConfig).find(
-      (key) => screenConfig[key].type === 'appointmentNode',
-    );
-    if (!appointmentScreenKey) return;
+    // --- 🚨 CAMBIO CRÍTICO: BÚSQUEDA INTELIGENTE DE LA PANTALLA ---
+    // En lugar de tomar el primer 'appointmentNode', buscamos cuál coincide con la selección del usuario.
 
-    const apptConfig = screenConfig[appointmentScreenKey].config;
+    let apptConfig: any = null;
+    let foundMapping: any = null;
+    const sessionValues = Object.values(newSessionData);
+    const screenKeys = Object.keys(screenConfig);
+
+    // 1. Recorremos todas las pantallas para encontrar cuál tiene el mapping correcto
+    for (const key of screenKeys) {
+      const screen = screenConfig[key];
+      if (screen.type === 'appointmentNode' && screen.config?.resourceMapping) {
+        const mapping = screen.config.resourceMapping;
+
+        // Verificamos si algún valor de la sesión existe en este mapping
+        for (const value of sessionValues) {
+          if (typeof value === 'string' && mapping[value]) {
+            // ¡ENCONTRADO! Esta es la pantalla correcta (ej: AGENDAR - Manicure)
+            apptConfig = screen.config;
+            foundMapping = mapping[value];
+            break;
+          }
+        }
+      }
+      if (apptConfig) break; // Si ya encontramos la config, paramos de buscar
+    }
+
+    // Fallback: Si no se encontró (ej: error raro), usamos el primero como respaldo
+    if (!apptConfig) {
+      const firstKey = screenKeys.find(
+        (k) => screenConfig[k].type === 'appointmentNode',
+      );
+      if (firstKey) apptConfig = screenConfig[firstKey].config;
+    }
+
+    if (!apptConfig) return; // Si aún así no hay config, salimos.
+
     const tool = apptConfig.tool;
     const selectedSlot = newSessionData.date;
 
-    // 1. Cargar configuración de recursos
+    // 2. Cargar configuración de recursos (De la pantalla CORRECTA)
     const resourceMapping = apptConfig.resourceMapping || {};
     const hasResources = Object.keys(resourceMapping).length > 0;
 
@@ -1631,58 +1676,51 @@ Pago de pensión por $290,000 COP\n`,
     let selectedProfessionalId = 'any_professional';
     let professionalDisplayName = '';
 
-    // --- LÓGICA DE SELECCIÓN DE PROFESIONAL ---
+    // --- 3. LÓGICA DE ASIGNACIÓN (Ya tenemos foundMapping del paso 1) ---
     if (hasResources) {
-      const sessionValues = Object.values(newSessionData);
-      let foundMapping: any = null;
-
-      for (const value of sessionValues) {
-        if (typeof value === 'string' && resourceMapping[value]) {
-          foundMapping = resourceMapping[value];
-          break;
-        }
-      }
-
       if (foundMapping) {
+        // CASO 1: SELECCIÓN EXPLÍCITA (ej: Fabiola)
+        // Como ya encontramos el mapping arriba, lo usamos directo.
         selectedProfessionalId = foundMapping.id;
         professionalDisplayName = foundMapping.nombre;
-      }
-    }
-
-    // --- LÓGICA ALEATORIA / AGENDA GENERAL ---
-    if (selectedProfessionalId === 'any_professional' && hasResources) {
-      const allResources = Object.values(resourceMapping) as any[];
-      const allResourceIds = allResources
-        .map((r) => r.id)
-        .filter((id) => id !== 'any_professional');
-
-      const occupation =
-        this.flowSessions.slotOccupation?.[selectedSlot] || new Set();
-      const availableResourceIds = allResourceIds.filter(
-        (id) => !occupation.has(id),
-      );
-
-      if (availableResourceIds.length > 0) {
-        const randomIndex = Math.floor(
-          Math.random() * availableResourceIds.length,
-        );
-        selectedProfessionalId = availableResourceIds[randomIndex];
-
-        const foundResource = allResources.find(
-          (r) => r.id === selectedProfessionalId,
-        );
-        if (foundResource) professionalDisplayName = foundResource.nombre;
-
-        this.logger.log(
-          `[DYN] Asignación abierta. Recurso seleccionado al azar: ${selectedProfessionalId}`,
-        );
       } else {
-        this.logger.error(
-          '[DYN] Error: Slot marcado disponible pero sin recursos libres. Guardando como genérico.',
+        // CASO 2: ASIGNACIÓN ALEATORIA (Solo si no hubo selección explícita)
+        // Se ejecuta si el usuario eligió "Cualquiera" o si hubo un fallo de mapeo.
+
+        const allResources = Object.values(resourceMapping) as any[];
+        const allResourceIds = allResources
+          .map((r) => r.id)
+          .filter((id) => id !== 'any_professional');
+
+        const occupation =
+          this.flowSessions.slotOccupation?.[selectedSlot] || new Set();
+        const availableResourceIds = allResourceIds.filter(
+          (id) => !occupation.has(id),
         );
-        selectedProfessionalId = 'any_professional';
+
+        if (availableResourceIds.length > 0) {
+          const randomIndex = Math.floor(
+            Math.random() * availableResourceIds.length,
+          );
+          selectedProfessionalId = availableResourceIds[randomIndex];
+
+          const foundResource = allResources.find(
+            (r) => r.id === selectedProfessionalId,
+          );
+          if (foundResource) professionalDisplayName = foundResource.nombre;
+
+          this.logger.log(
+            `[DYN] Asignación abierta. Recurso seleccionado al azar: ${selectedProfessionalId}`,
+          );
+        } else {
+          this.logger.error(
+            '[DYN] Error: Slot marcado disponible pero sin recursos libres. Guardando como genérico.',
+          );
+          selectedProfessionalId = 'any_professional';
+        }
       }
-    } else if (!hasResources) {
+    } else {
+      // Sin recursos configurados
       this.logger.log(
         `[DYN] Agenda General. Guardando como 'any_professional'.`,
       );
@@ -1695,12 +1733,10 @@ Pago de pensión por $290,000 COP\n`,
     });
     title = title.replace(/\$\{user\.phone\}/g, userNumber);
 
-    // Agregar Nombre del Cliente al título (Opcional, pero recomendado)
     if (userName) {
       title += ` - ${userName}`;
     }
 
-    // Agregar Nombre del Profesional al título
     if (
       selectedProfessionalId !== 'any_professional' &&
       professionalDisplayName
