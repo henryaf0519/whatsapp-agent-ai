@@ -13,7 +13,7 @@ declare const module: any;
 
 const allowedOrigins = [
   'http://localhost:5173',
-  'https://orvexchat-666d6.web.app',
+  'https://orvexia-4f178.web.app',
 ];
 
 async function bootstrap() {
