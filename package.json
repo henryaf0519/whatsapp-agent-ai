@@ -45,6 +45,7 @@
     "cookie-parser": "^1.4.7",
     "cron-parser": "^4.6.0",
     "cross-fetch": "^4.1.0",
+    "csv-parser": "^3.2.0",
     "google-auth-library": "^10.1.0",
     "googleapis": "^134.0.0",
     "langchain": "^0.3.29",

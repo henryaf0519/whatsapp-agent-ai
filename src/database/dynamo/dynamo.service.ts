@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-misused-promises */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-redundant-type-constituents */
@@ -5,7 +7,13 @@
 
 /* eslint-disable @typescript-eslint/require-await */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
+import {
+  forwardRef,
+  Inject,
+  Injectable,
+  Logger,
+  OnModuleInit,
+} from '@nestjs/common';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -23,6 +31,9 @@ import { v4 as uuidv4 } from 'uuid';
 import { normalizeString } from '../../utils/utils';
 import { WhatsappService } from '../../whatsapp/whatsapp.service';
 import cronParser from 'cron-parser';
+import * as fs from 'fs';
+import csv from 'csv-parser';
+import * as path from 'path';
 
 interface AgentScheduleItem {
   id: string;
@@ -41,7 +52,7 @@ interface ConversationItem {
 }
 
 @Injectable()
-export class DynamoService {
+export class DynamoService implements OnModuleInit {
   private readonly dynamoClient: DynamoDBClient;
   private readonly docClient: DynamoDBDocumentClient;
   private readonly logger = new Logger(DynamoService.name);
@@ -54,6 +65,21 @@ export class DynamoService {
       region: this.config.get<string>('AWS_REGION'),
     });
     this.docClient = DynamoDBDocumentClient.from(this.dynamoClient);
+  }
+
+  async onModuleInit() {
+    console.log('--- Iniciando carga masiva de datos desde CSV ---');
+
+    const csvPath = path.resolve(
+      'C:\\Users\\Pc\\Documents\\Desarrollo\\Backend\\whatsapp-agent-ia\\clientes.csv',
+    );
+    console.log('csvPath:', csvPath);
+    try {
+      await this.cargarClientesFinal(csvPath);
+      console.log('--- Proceso finalizado con éxito ---');
+    } catch (error) {
+      console.error('--- Error en la carga inicial ---', error);
+    }
   }
 
   async guardarDato(payload: Record<string, any>): Promise<AgentScheduleItem> {
@@ -720,6 +746,64 @@ export class DynamoService {
         throw error;
       }
     }
+  }
+
+  async cargarClientesFinal(filePath: string): Promise<void> {
+    const client = new DynamoDBClient({ region: 'us-east-2' }); // Ajusta tu región
+    const docClient = DynamoDBDocumentClient.from(client);
+    const filas: any[] = [];
+
+    return new Promise((resolve, reject) => {
+      fs.createReadStream(filePath)
+        .pipe(csv())
+        .on('data', (data) => filas.push(data))
+        .on('error', (err) => reject(err))
+        .on('end', async () => {
+          console.log(`--- Iniciando carga de ${filas.length} registros ---`);
+
+          for (const row of filas) {
+            // 1. Limpieza y formateo del número
+            let rawId = row['conversationId']?.toString().trim() || '';
+
+            // Quitamos cualquier '+' que ya traiga para evitar duplicados
+            rawId = rawId.replace(/\+/g, '');
+
+            // Aseguramos el prefijo +57
+            // Si ya empieza por 57, solo le ponemos el +
+            // Si no, le ponemos +57 completo
+            const formattedId = rawId.startsWith('57')
+              ? `+${rawId}`
+              : `57${rawId}`;
+
+            const item = {
+              businessId: row['businessId'],
+              conversationId: formattedId,
+              contactName: row['contactName'],
+              modo: row['modo'] || 'IA',
+              name: row['name'] || row['contactName'],
+              stage: 'cliente', // Forzado a "cliente"
+              createdAt: row['createdAt'] || new Date().toISOString(),
+            };
+
+            if (!item.businessId || rawId === '') continue;
+
+            try {
+              await docClient.send(
+                new PutCommand({
+                  TableName: 'ChatControl',
+                  Item: item,
+                }),
+              );
+              console.log(`✅ Subido: ${formattedId}`);
+            } catch (error) {
+              console.error(`❌ Error en ${formattedId}:`, error);
+            }
+          }
+
+          console.log('--- ¡Proceso completado con éxito! ---');
+          resolve();
+        });
+    });
   }
 
   async updateContactStage(
