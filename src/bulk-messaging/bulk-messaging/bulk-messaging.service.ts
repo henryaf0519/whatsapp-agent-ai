@@ -9,6 +9,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { DynamoService } from '../../database/dynamo/dynamo.service';
 import { WhatsappService } from '../../whatsapp/whatsapp.service';
 import { CreateScheduleDto } from '../dto/create-schedule.dto';
+import { SendImmediateDto } from '../dto/send-immediate.dto';
 import { v4 as uuidv4 } from 'uuid';
 import axios from 'axios';
 import { SocketGateway } from 'src/socket/socket.gateway';
@@ -285,6 +286,75 @@ export class BulkMessagingService {
       this.logger.debug(`[Send] OK. MessageID: ${messageId}`);
     } catch (e) {
       this.logger.error(`[Send] Error enviando a ${contact.number}:`, e);
+    }
+  }
+
+  async sendImmediate(dto: SendImmediateDto): Promise<{ success: boolean; sentCount: number }> {
+    this.logger.log(`[SendImmediate] Iniciando envío inmediato para plantilla: ${dto.templateName}`);
+    
+    // 1. Construimos un objeto que cumpla con la interfaz TemplateSchedule
+    // Usamos 'static_list' y 'once' para que la lógica de los helpers funcione perfectamente.
+    const tempSchedule: TemplateSchedule = {
+      scheduleId: uuidv4(),
+      name: `Envío Inmediato - ${dto.templateName} - ${new Date().toISOString()}`,
+      templateName: dto.templateName,
+      templateId: dto.templateId,
+      waba_id: dto.waba_id,
+      number_id: dto.number_id,
+      phoneNumbers: dto.phoneNumbers,
+      scheduleType: 'once',
+      targetType: 'static_list',
+      targetStageId: null,
+    };
+
+    try {
+      // 2. Obtener contactos (reutilizamos tu helper, que leerá la lista estática del DTO)
+      const contactsToSend = await this.getContactsForSchedule(tempSchedule);
+
+      if (contactsToSend.length === 0) {
+        this.logger.warn(`[SendImmediate] No hay contactos válidos en el payload para enviar.`);
+        return { success: false, sentCount: 0 };
+      }
+
+      // 3. Preparar Template y Media (descarga la imagen/video si la plantilla lo requiere)
+      const { template, mediaId } = await this.prepareTemplateAndMedia(tempSchedule);
+
+      // 4. Obtener triggers/payloads de botones desde DynamoDB
+      const templateTriggers = await this.dynamoService.getTriggersByTemplateId(
+        tempSchedule.number_id, 
+        tempSchedule.templateId 
+      );
+      
+      if (templateTriggers.length > 0) {
+          this.logger.log(`[SendImmediate] Se inyectarán ${templateTriggers.length} payloads de botones.`);
+      } else {
+          this.logger.debug(`[SendImmediate] No se encontraron triggers para botones de esta plantilla.`);
+      }
+
+      // 5. Iterar y enviar los mensajes (Reutilizamos tu helper que guarda en BD y emite al Socket)
+      let sentCount = 0;
+      for (const contact of contactsToSend) { 
+        await this.sendAndLogTemplateMessage(
+          tempSchedule,
+          contact,
+          template,
+          mediaId,
+          templateTriggers
+        );
+        sentCount++;
+      }
+      
+      this.logger.log(`[SendImmediate] <<< Envío inmediato completado. ${sentCount} mensajes enviados.`);
+      return { success: true, sentCount };
+
+    } catch (error) {
+      const errorMessage = typeof error === 'object' && error !== null && 'message' in error ? (error as any).message : String(error);
+      this.logger.error(
+        `[SendImmediate] CRITICAL ERROR procesando envío inmediato: ${errorMessage}`,
+        error,
+      );
+      // Retornamos falso en vez de lanzar el error para que tu frontend/cliente reciba un status controlado
+      return { success: false, sentCount: 0 }; 
     }
   }
 
