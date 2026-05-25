@@ -32,10 +32,7 @@ export class DynamoController {
     @Param('conversationId') conversationId: string,
     @Req() req: Request,
   ) {
-    // Obtenemos el number_id del usuario logueado desde el token
-    console.log('Fetching messages for conversationId:', conversationId);
     const user = req.user as { number_id: string } | undefined;
-    console.log('Fetching messages for conversationId:', user);
     if (!user || !user.number_id) {
       throw new Error('number_id no encontrado en el token del usuario.');
     }

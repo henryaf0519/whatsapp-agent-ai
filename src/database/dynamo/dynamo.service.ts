@@ -68,7 +68,7 @@ export class DynamoService implements OnModuleInit {
   }
 
   async onModuleInit() {
-    console.log('--- Iniciando carga masiva de datos desde CSV ---');
+   /* console.log('--- Iniciando carga masiva de datos desde CSV ---');
 
     const csvPath = path.resolve(
       'C:\\Users\\Pc\\Documents\\Desarrollo\\Backend\\whatsapp-agent-ia\\clientes.csv',
@@ -79,7 +79,7 @@ export class DynamoService implements OnModuleInit {
       console.log('--- Proceso finalizado con éxito ---');
     } catch (error) {
       console.error('--- Error en la carga inicial ---', error);
-    }
+    }*/
   }
 
   async guardarDato(payload: Record<string, any>): Promise<AgentScheduleItem> {
