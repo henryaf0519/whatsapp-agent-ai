@@ -356,6 +356,9 @@ export class WhatsappWebhookController implements OnModuleDestroy {
   @Get('webhook')
   verifyWebhook(@Req() req: Request, @Res() res: Response): Response {
     try {
+      console.log('Received webhook verification request', {
+        query: req.query,
+      });
       const VERIFY_TOKEN = this.configService.get<string>(
         'WHATSAPP_VERIFY_TOKEN',
       );
