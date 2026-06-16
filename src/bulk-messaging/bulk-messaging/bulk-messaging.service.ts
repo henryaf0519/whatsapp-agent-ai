@@ -291,9 +291,6 @@ export class BulkMessagingService {
 
   async sendImmediate(dto: SendImmediateDto): Promise<{ success: boolean; sentCount: number }> {
     this.logger.log(`[SendImmediate] Iniciando envío inmediato para plantilla: ${dto.templateName}`);
-    
-    // 1. Construimos un objeto que cumpla con la interfaz TemplateSchedule
-    // Usamos 'static_list' y 'once' para que la lógica de los helpers funcione perfectamente.
     const tempSchedule: TemplateSchedule = {
       scheduleId: uuidv4(),
       name: `Envío Inmediato - ${dto.templateName} - ${new Date().toISOString()}`,
@@ -333,19 +330,45 @@ export class BulkMessagingService {
 
       // 5. Iterar y enviar los mensajes (Reutilizamos tu helper que guarda en BD y emite al Socket)
       let sentCount = 0;
-      for (const contact of contactsToSend) { 
-        await this.sendAndLogTemplateMessage(
-          tempSchedule,
-          contact,
-          template,
-          mediaId,
-          templateTriggers
-        );
-        sentCount++;
+      const BATCH_SIZE = 5;
+      const DELAY_BETWEEN_BATCHES_MS = 15000;
+      for (let i = 0; i < contactsToSend.length; i += BATCH_SIZE) {
+        const batch = contactsToSend.slice(i, i + BATCH_SIZE);
+        
+        // Creamos un array de promesas para el lote actual
+        const batchPromises = batch.map(async (contact) => {
+          try {
+            await this.sendAndLogTemplateMessage(
+              tempSchedule,
+              contact,
+              template,
+              mediaId,
+              templateTriggers
+            );
+            return true; // Éxito
+          } catch (error) {
+            // Capturamos el error a nivel individual para no romper el ciclo principal
+            const msg = error instanceof Error ? error.message : String(error);
+            this.logger.error(`[SendImmediate] Falló el envío a ${contact}: ${msg}`);
+            return false; // Falló
+          }
+        });
+
+        // Ejecutamos el lote de 15 mensajes en paralelo
+        const results = await Promise.all(batchPromises);
+        
+        // Contamos cuántos de este lote fueron exitosos
+        sentCount += results.filter(success => success === true).length;
+
+        // Si aún quedan lotes por procesar, hacemos una pausa para evitar Rate Limits (429)
+        if (i + BATCH_SIZE < contactsToSend.length) {
+          await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES_MS));
+        }
       }
       
-      this.logger.log(`[SendImmediate] <<< Envío inmediato completado. ${sentCount} mensajes enviados.`);
+      this.logger.log(`[SendImmediate] <<< Envío inmediato completado. ${sentCount}/${contactsToSend.length} enviados exitosamente.`);
       return { success: true, sentCount };
+      
 
     } catch (error) {
       const errorMessage = typeof error === 'object' && error !== null && 'message' in error ? (error as any).message : String(error);
