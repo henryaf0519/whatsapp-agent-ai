@@ -238,6 +238,7 @@ const ALL_OPTIONS = [
 @Injectable()
 export class FlowService {
   private readonly baseUrl = 'https://graph.facebook.com/v22.0';
+  private readonly quotationBaseUrl = 'https://mikayros.paisasoft.com/api/';
   private readonly logger = new Logger(FlowService.name);
   private readonly privateKey: string | undefined;
   private readonly urlWebhook: string | undefined;
@@ -345,12 +346,12 @@ export class FlowService {
             plan: findTitle(data.independent_plan || data.dependent_plan),
             price: findTitle(
               data.pricesd_h ||
-                data.pricesd_hr ||
-                data.pricesd_hrp ||
-                data.pricesd_hrb ||
-                data.pricesd_hrpc ||
-                data.prices_dhr ||
-                data.prices_hrp,
+              data.pricesd_hr ||
+              data.pricesd_hrp ||
+              data.pricesd_hrb ||
+              data.pricesd_hrpc ||
+              data.prices_dhr ||
+              data.prices_hrp,
             ),
           };
           this.flowSessions[flow_token] = { productSelection };
@@ -1355,8 +1356,19 @@ Pago de pensión por $290,000 COP\n`,
         );
         return { date: dates };
 
+      case 'execute_backend_service':
+        this.logger.log(`[DYN] Iniciando ejecución del servicio backend para cotización...`);
+
+        // Aquí llamamos a la lógica que va a consumir tu API de cotizaciones
+        const result = await this._processQuotation(data, numberId);
+
+        // Retornamos el resultado para que el Flow pueda mostrarlo en la pantalla
+        return { details: result };
+
+
+
       default:
-        this.logger.warn(`[DYN] dataSourceTrigger no reconocido: ${trigger}`);
+        this.logger.warn(`[DYN] dataSourceTrigger no reconocido: ${trigger} `);
         return {};
     }
   }
@@ -1579,13 +1591,16 @@ Pago de pensión por $290,000 COP\n`,
     flow_token: string,
   ): Promise<void> {
     try {
-      // 1. Intentar crear la cita en el calendario si el flujo lo define
-      await this._createCalendarEvent(
-        newSessionData,
-        flowNavigate,
-        numberId,
-        userNumber,
-      );
+
+      const isQuotationFlow = flowJson.name?.toLowerCase().includes('cotiz');
+
+      if (isQuotationFlow) {
+        this.logger.log(`[DYN] Ejecutando lógica de COTIZACIÓN para: ${flow_token} `);
+        await this._processQuotation(newSessionData, numberId);
+      } else {
+        // Lógica original de citas
+        await this._createCalendarEvent(newSessionData, flowNavigate, numberId, userNumber);
+      }
 
       // 2. Guardar el resumen final en la base de datos y notificar al socket
       const details = this._buildDynamicDetails(
@@ -1595,14 +1610,14 @@ Pago de pensión por $290,000 COP\n`,
       );
       await this.saveMessage(numberId, userNumber, details);
       this.logger.log(
-        `[DYN] Resumen generado y guardado: ${JSON.stringify(details)}`,
+        `[DYN] Resumen generado y guardado: ${JSON.stringify(details)} `,
       );
       delete this.flowSessions[flow_token];
       this.logger.log(`[DYN] Sesión ${flow_token} finalizada y limpiada.`);
     } catch (e) {
       delete this.flowSessions[flow_token];
       this.logger.error(
-        `[DYN] Error durante la ejecución de fin de flujo: ${e}`,
+        `[DYN] Error durante la ejecución de fin de flujo: ${e} `,
       );
     }
   }
@@ -1710,7 +1725,7 @@ Pago de pensión por $290,000 COP\n`,
           if (foundResource) professionalDisplayName = foundResource.nombre;
 
           this.logger.log(
-            `[DYN] Asignación abierta. Recurso seleccionado al azar: ${selectedProfessionalId}`,
+            `[DYN] Asignación abierta.Recurso seleccionado al azar: ${selectedProfessionalId} `,
           );
         } else {
           this.logger.error(
@@ -1722,7 +1737,7 @@ Pago de pensión por $290,000 COP\n`,
     } else {
       // Sin recursos configurados
       this.logger.log(
-        `[DYN] Agenda General. Guardando como 'any_professional'.`,
+        `[DYN] Agenda General.Guardando como 'any_professional'.`,
       );
       selectedProfessionalId = 'any_professional';
     }
@@ -1734,7 +1749,7 @@ Pago de pensión por $290,000 COP\n`,
     title = title.replace(/\$\{user\.phone\}/g, userNumber);
 
     if (userName) {
-      title += ` - ${userName}`;
+      title += ` - ${userName} `;
     }
 
     if (
@@ -1778,7 +1793,7 @@ Pago de pensión por $290,000 COP\n`,
       );
 
       this.logger.log(
-        `[DYN] Cita guardada. Cliente: ${userName}, Profesional: ${selectedProfessionalId}, Link: ${meetingLink}`,
+        `[DYN] Cita guardada.Cliente: ${userName}, Profesional: ${selectedProfessionalId}, Link: ${meetingLink} `,
       );
     } catch (calendarError) {
       this.logger.error(
@@ -1809,7 +1824,7 @@ Pago de pensión por $290,000 COP\n`,
       if (flowNavigate && flowNavigate[selectedOptionId]) {
         const nextScreenId = flowNavigate[selectedOptionId].pantalla;
         this.logger.log(
-          `[DYN] Navegación por Opción: ${screen} -> ${nextScreenId}`,
+          `[DYN] Navegación por Opción: ${screen} -> ${nextScreenId} `,
         );
         return nextScreenId;
       } else {
@@ -1839,7 +1854,7 @@ Pago de pensión por $290,000 COP\n`,
     const nextScreenId = flowJson.routing_model[screen]?.[0];
     if (nextScreenId) {
       this.logger.log(
-        `[DYN] Navegación por Fallback: ${screen} -> ${nextScreenId}`,
+        `[DYN] Navegación por Fallback: ${screen} -> ${nextScreenId} `,
       );
       return nextScreenId;
     }
@@ -1869,7 +1884,7 @@ Pago de pensión por $290,000 COP\n`,
     // 1. Lógica del Data Source Trigger (ej. 'fetch_available_dates')
     if (screenConfig && screenConfig.dataSourceTrigger) {
       this.logger.log(
-        `[DYN] Pantalla '${nextScreenId}' tiene un dataSourceTrigger: ${screenConfig.dataSourceTrigger}`,
+        `[DYN] Pantalla '${nextScreenId}' tiene un dataSourceTrigger: ${screenConfig.dataSourceTrigger} `,
       );
       nextScreenData = await this._handleDataSourceTrigger(
         screenConfig.dataSourceTrigger,
@@ -1882,7 +1897,7 @@ Pago de pensión por $290,000 COP\n`,
     // 2. Lógica para preparar 'details' (para pantallas de confirmación)
     if (screenConfig && screenConfig.type === 'confirmationNode') {
       this.logger.log(
-        `[DYN] Generando datos 'details' para MOSTRAR en la pantalla ${nextScreenId}`,
+        `[DYN] Generando datos 'details' para MOSTRAR en la pantalla ${nextScreenId} `,
       );
       const details = this._buildDynamicDetails(
         newSessionData,
@@ -1891,7 +1906,7 @@ Pago de pensión por $290,000 COP\n`,
       );
       detailsData = { details: details };
       this.logger.log(
-        `[DYN] 'details' generados para mostrar: ${JSON.stringify(details)}`,
+        `[DYN] 'details' generados para mostrar: ${JSON.stringify(details)} `,
       );
     }
 
@@ -1917,6 +1932,43 @@ Pago de pensión por $290,000 COP\n`,
         },
       },
     };
+  }
+
+
+  private async _processQuotation(newSessionData: any, numberId: string) {
+    // Mapeo manual de tus llaves de WhatsApp al DTO de Arriendy
+    const payload = {
+      id: 0,
+      tenantId: 2, // ¡Recuerda parametrizarlo!
+      channel: "whatsapp-bot-test",
+      fullName: newSessionData["NOMBRE COMPLETO"],
+      phoneNumber: newSessionData["TELÉFONO / WHATSAPP"],
+      email: newSessionData["EMAIL"],
+      isResidentialDestination: newSessionData["¿CUAL ES EL USO DEL INMUEBLE?"] === "Residencial",
+      rentAmount: parseInt(newSessionData["VALOR DEL CANON"]),
+      contractDuration: parseInt(newSessionData["DURACIÓN DEL CONTRATO"]),
+    };
+
+    // Llamada al endpoint
+    //const response = await axios.post(`${this.quotationBaseUrl} Quotations / calc`, payload);
+    //this.logger.log(`[COTIZACIÓN] API respondió: ${JSON.stringify(response.data)} `);
+    const apiResponse = {
+      id: 152,
+      selectedPlanValue: 365450,
+      planName: "Básico"
+    };
+
+    // 2. Aquí está el truco: Armamos el string de detalles que tu pantalla ya sabe leer
+    const details = `✅ Cotización generada con éxito:\n\n` +
+      `ID: ${apiResponse.id}\n` +
+      `Plan sugerido: ${apiResponse.planName}\n` +
+      `Valor total: $${apiResponse.selectedPlanValue.toLocaleString()}\n\n` +
+      `¿Deseas continuar con este plan?`;
+
+    this.logger.log(`[COTIZACIÓN] Datos formateados para 'details': ${details}`);
+
+    // 3. Retornamos la estructura que el FlowService espera para inyectar en 'data.details'
+    return details;
   }
 
   @Cron(CronExpression.EVERY_30_MINUTES)
