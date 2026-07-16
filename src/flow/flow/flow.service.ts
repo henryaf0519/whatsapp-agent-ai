@@ -24,6 +24,7 @@ import FormData from 'form-data';
 import moment from 'moment';
 import { CalendarService } from 'src/calendar/calendar.service';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { QuotationService } from 'src/quotation/quotation.service';
 
 const WELCOME_OPTIONS = [
   { id: 'ABOUT_US', title: 'Quienes Somos' },
@@ -251,6 +252,7 @@ export class FlowService {
     @Inject(forwardRef(() => WhatsappService))
     private readonly whatsappService: WhatsappService,
     private readonly calendarService: CalendarService,
+    private readonly quotationService: QuotationService,
   ) {
     const privateKey = this.configService.get<string>(
       'WHATSAPP_FLOW_PRIVATE_KEY',
@@ -1303,8 +1305,9 @@ Pago de pensión por $290,000 COP\n`,
     config: any, // Aquí viene la config del nodo (incluyendo resourceMapping)
     numberId: string,
     data: any,
+    newSessionData: any
   ): Promise<Record<string, any>> {
-    this.logger.log(`[DYN] Ejecutando dataSourceTrigger: ${trigger}`);
+    this.logger.log(`[DYN] Navegación: ${JSON.stringify(newSessionData)}`);
 
     switch (trigger) {
       case 'fetch_available_dates':
@@ -1360,7 +1363,7 @@ Pago de pensión por $290,000 COP\n`,
         this.logger.log(`[DYN] Iniciando ejecución del servicio backend para cotización...`);
 
         // Aquí llamamos a la lógica que va a consumir tu API de cotizaciones
-        const result = await this._processQuotation(data, numberId);
+        const result = await this._processQuotation(newSessionData, numberId);
 
         // Retornamos el resultado para que el Flow pueda mostrarlo en la pantalla
         return { details: result };
@@ -1591,13 +1594,49 @@ Pago de pensión por $290,000 COP\n`,
     flow_token: string,
   ): Promise<void> {
     try {
+      this.logger.log(`[DYN] Ejecutando lógica de fin de flujo para: ${flowJson.name || 'Desconocido'}`);
 
-      const isQuotationFlow = flowJson.name?.toLowerCase().includes('cotiz');
+      // Recuperamos la respuesta completa que guardamos en el paso anterior
+      const fullQuotationResponse = newSessionData.fullQuotationResponse;
+      const rawSelectedPlan = newSessionData['selected_plan'];
 
-      if (isQuotationFlow) {
-        this.logger.log(`[DYN] Ejecutando lógica de COTIZACIÓN para: ${flow_token} `);
-        await this._processQuotation(newSessionData, numberId);
-      } else {
+      if (fullQuotationResponse && rawSelectedPlan) {
+        this.logger.log(`[DYN] Flujo de Cotización detectado. Plan seleccionado por usuario: ${rawSelectedPlan}`);
+
+        const plansArray = fullQuotationResponse.plans || [];
+        let selectedPlanId: any = null;
+
+        if (plansArray.length > 0) {
+          const normalizeText = (text: string) =>
+            text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace("plan ", "").trim();
+
+          const normalizedSelection = normalizeText(rawSelectedPlan);
+
+          // Buscar el plan exacto dentro del array de planes para sacar su ID
+          for (const plan of plansArray) {
+            const planName = plan.planName || plan.name || '';
+            if (normalizeText(planName) === normalizedSelection) {
+              selectedPlanId = plan.planId !== undefined ? plan.planId : plan.id;
+              break;
+            }
+          }
+
+          if (selectedPlanId !== null) {
+            this.logger.log(`[DYN] Match exitoso. planId extraído: ${selectedPlanId}`);
+            const selectPlanPayload = {
+              ...fullQuotationResponse,
+              selectedPlanId: selectedPlanId
+            };
+            await this.quotationService.selectPlan(selectPlanPayload);
+            this.logger.log(`[DYN] Plan guardado exitosamente en el backend.`);
+          } else {
+            this.logger.warn(`[DYN] No se encontró el ID para el plan seleccionado: ${rawSelectedPlan}`);
+          }
+        } else {
+          this.logger.warn(`[DYN] El array de planes estaba vacío en la respuesta original.`);
+        }
+      }
+      else {
         // Lógica original de citas
         await this._createCalendarEvent(newSessionData, flowNavigate, numberId, userNumber);
       }
@@ -1891,6 +1930,7 @@ Pago de pensión por $290,000 COP\n`,
         screenConfig.config,
         numberId,
         data,
+        newSessionData
       );
     }
 
@@ -1935,40 +1975,110 @@ Pago de pensión por $290,000 COP\n`,
   }
 
 
-  private async _processQuotation(newSessionData: any, numberId: string) {
+  private async _processQuotation(data: any, numberId: string) {
+
+    this.logger.log('Iniciando procesamiento de cotización con data:', data);
     // Mapeo manual de tus llaves de WhatsApp al DTO de Arriendy
-    const payload = {
-      id: 0,
-      tenantId: 2, // ¡Recuerda parametrizarlo!
-      channel: "whatsapp-bot-test",
-      fullName: newSessionData["NOMBRE COMPLETO"],
-      phoneNumber: newSessionData["TELÉFONO / WHATSAPP"],
-      email: newSessionData["EMAIL"],
-      isResidentialDestination: newSessionData["¿CUAL ES EL USO DEL INMUEBLE?"] === "Residencial",
-      rentAmount: parseInt(newSessionData["VALOR DEL CANON"]),
-      contractDuration: parseInt(newSessionData["DURACIÓN DEL CONTRATO"]),
+    const cleanNumber = (val: string | undefined) =>
+      val ? parseInt(val.toString().replace(/\D/g, ''), 10) : 0;
+
+    const isYes = (val: string | undefined) =>
+      val ? val.toString().trim().toLowerCase() === 'si' : false;
+
+    // 2. Mapeo de Cantidad de Inmuebles
+    const mapRentalProperties = (rango: string | undefined): number => {
+      const mapeo: Record<string, number> = {
+        '1 a 5': 1,
+        '6 a 10': 2,
+        '11 a 15': 3,
+        '16 a 20': 4,
+        '21 a 25': 5,
+        '25 o más': 6,
+      };
+      return rango ? mapeo[rango.trim()] || 0 : 0;
     };
 
+    const finalFullName = data['NOMBRE COMPLETO']?.trim().substring(0, 100) || '';
+    const finalEmail = data['EMAIL']?.trim().substring(0, 50) || '';
+    const finalRentAmount = cleanNumber(data['VALOR DEL CANON']);
+    const finalContractDuration = cleanNumber(data['DURACIÓN DEL CONTRATO']);
+    const valorAdministracion = cleanNumber(data['VALOR ADMINISTRACION']);
+    const finalMaintenanceFee = valorAdministracion > 0 ? valorAdministracion : 0;
+
+    const faltantes = cleanNumber(data['FALTANTES']);
+    const cantidadInmuebles = data['CANTIDAD INMUEBLES']?.trim();
+    const codigoAsesor = data['CODIGO ASESOR']?.trim();
     // Llamada al endpoint
     //const response = await axios.post(`${this.quotationBaseUrl} Quotations / calc`, payload);
     //this.logger.log(`[COTIZACIÓN] API respondió: ${JSON.stringify(response.data)} `);
-    const apiResponse = {
-      id: 152,
-      selectedPlanValue: 365450,
-      planName: "Básico"
+
+    const signatureCalculada = Math.trunc(
+      (finalFullName.length * finalEmail.length + (finalRentAmount + finalMaintenanceFee)) * finalContractDuration
+    );
+
+    const isCurrentlyRentedValue = isYes(data['¿El INQUILINO YA HABITA EL INMUEBLE?']);
+
+    const payload: any = {
+      id: 0,
+      tenantId: 2, // Parametrizar según tu lógica de entorno
+      channel: 'whatsapp-bot-test',
+      fullName: data['NOMBRE COMPLETO']?.trim().substring(0, 100) || '',
+      phoneNumber: data['TELÉFONO / WHATSAPP']?.replace(/[^\d\s\+\-\(\)]/g, '').substring(0, 20) || '',
+      email: data['EMAIL']?.trim().substring(0, 50) || '',
+
+      isOwner: data['¿QUIEN ERES?']?.trim().toLowerCase() === 'propietario',
+      isNaturalPerson: data['¿ERES PERSONA O EMPRESA?']?.trim().toLowerCase() === 'persona natural',
+      isResidentialDestination: data['¿CUAL ES EL USO DEL INMUEBLE?']?.trim().toLowerCase() === 'residencial',
+      isCurrentlyRented: isYes(data['¿El INQUILINO YA HABITA EL INMUEBLE?']),
+      ...(isCurrentlyRentedValue && { contractExpirationMonth: 3 }),
+      acceptTerms: true,
+
+      rentAmount: cleanNumber(data['VALOR DEL CANON']),
+      contractDuration: cleanNumber(data['DURACIÓN DEL CONTRATO']),
+
+      vatApply: isYes(data['COBERTURA IVA']),
+      homeAssistance: isYes(data['ASISTENCIA DOMICILIARIA']),
+
+      // Administracion
+      maintenanceFeeApply: valorAdministracion > 0,
+      ...(valorAdministracion > 0 && { maintenanceFee: valorAdministracion }),
+
+      // Faltantes
+      damagesMissingApply: faltantes > 0,
+      ...(faltantes > 0 && { damagesMissing: faltantes }),
+
+      // Múltiples inmuebles
+      hasMoreRentProperties: !!cantidadInmuebles,
+      ...(cantidadInmuebles && { howManyMoreRentalProperties: mapRentalProperties(cantidadInmuebles) }),
+
+      // Asesor
+      receivedHelpFromAdvisor: !!codigoAsesor,
+      ...(codigoAsesor && { advisorCode: codigoAsesor }),
+
+      signature: signatureCalculada
+
+      // selectedPlanId: 1 // (Opcional) Descomentar si deseas sugerir un plan específico por defecto
     };
 
-    // 2. Aquí está el truco: Armamos el string de detalles que tu pantalla ya sabe leer
-    const details = `✅ Cotización generada con éxito:\n\n` +
-      `ID: ${apiResponse.id}\n` +
-      `Plan sugerido: ${apiResponse.planName}\n` +
-      `Valor total: $${apiResponse.selectedPlanValue.toLocaleString()}\n\n` +
-      `¿Deseas continuar con este plan?`;
+    this.logger.log(`[COTIZACIÓN] Payload enviado a la API`);
 
-    this.logger.log(`[COTIZACIÓN] Datos formateados para 'details': ${details}`);
+    try {
+      // Llamada real al servicio
+      const apiResponse = await this.quotationService.calculateQuotation(payload);
 
-    // 3. Retornamos la estructura que el FlowService espera para inyectar en 'data.details'
-    return details;
+      // Verificamos que la API haya respondido con el arreglo de planes
+      if (apiResponse && apiResponse.plans && Array.isArray(apiResponse.plans)) {
+        data.fullQuotationResponse = apiResponse;
+        this.logger.log(`[COTIZACIÓN] Respuesta completa guardada en sesión.`);
+        return this.quotationService.formatPlansMessage(apiResponse.plans);
+      } else {
+        throw new Error("La API no devolvió un arreglo válido de planes.");
+      }
+
+    } catch (error) {
+      this.logger.error(`[COTIZACIÓN] Error en el proceso de cotización`, error);
+      return `❌ Ocurrió un error al generar tu cotización. Por favor, intenta de nuevo más tarde o comunícate con un asesor.`;
+    }
   }
 
   @Cron(CronExpression.EVERY_30_MINUTES)
