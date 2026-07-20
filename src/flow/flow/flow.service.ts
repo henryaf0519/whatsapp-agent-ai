@@ -24,6 +24,7 @@ import FormData from 'form-data';
 import moment from 'moment';
 import { CalendarService } from 'src/calendar/calendar.service';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { QuotationService } from 'src/quotation/quotation.service';
 
 const WELCOME_OPTIONS = [
   { id: 'ABOUT_US', title: 'Quienes Somos' },
@@ -238,6 +239,7 @@ const ALL_OPTIONS = [
 @Injectable()
 export class FlowService {
   private readonly baseUrl = 'https://graph.facebook.com/v22.0';
+  private readonly quotationBaseUrl = 'https://mikayros.paisasoft.com/api/';
   private readonly logger = new Logger(FlowService.name);
   private readonly privateKey: string | undefined;
   private readonly urlWebhook: string | undefined;
@@ -250,6 +252,7 @@ export class FlowService {
     @Inject(forwardRef(() => WhatsappService))
     private readonly whatsappService: WhatsappService,
     private readonly calendarService: CalendarService,
+    private readonly quotationService: QuotationService,
   ) {
     const privateKey = this.configService.get<string>(
       'WHATSAPP_FLOW_PRIVATE_KEY',
@@ -345,12 +348,12 @@ export class FlowService {
             plan: findTitle(data.independent_plan || data.dependent_plan),
             price: findTitle(
               data.pricesd_h ||
-                data.pricesd_hr ||
-                data.pricesd_hrp ||
-                data.pricesd_hrb ||
-                data.pricesd_hrpc ||
-                data.prices_dhr ||
-                data.prices_hrp,
+              data.pricesd_hr ||
+              data.pricesd_hrp ||
+              data.pricesd_hrb ||
+              data.pricesd_hrpc ||
+              data.prices_dhr ||
+              data.prices_hrp,
             ),
           };
           this.flowSessions[flow_token] = { productSelection };
@@ -766,11 +769,8 @@ Pago de pensión por $290,000 COP\n`,
 
         if (fieldName === 'date') {
           formattedKey = 'Cita seleccionada';
-        } else if (
-          fieldType === 'RadioButtonsGroup' ||
-          (fieldType === 'Dropdown' && fieldName !== 'date')
-        ) {
-          formattedKey = 'Seleccionaste';
+        } else if (fieldName === 'selected_plan' || fieldName === 'plan') {
+          formattedKey = 'Plan Seleccionado';
         } else if (field.label) {
           formattedKey = field.label.replace(':', '');
         } else {
@@ -778,6 +778,7 @@ Pago de pensión por $290,000 COP\n`,
             .replace(/_/g, ' ')
             .replace(/\b\w/g, (char) => char.toUpperCase());
         }
+
         let readableValue = String(value);
         if (
           readableValue.startsWith('opcion_') ||
@@ -791,6 +792,10 @@ Pago de pensión por $290,000 COP\n`,
           } else {
             continue;
           }
+        }
+
+        if (formattedKey.trim().toLowerCase() === 'selecciona') {
+          continue;
         }
 
         details.push(`${formattedKey}: ${readableValue}`);
@@ -1302,8 +1307,9 @@ Pago de pensión por $290,000 COP\n`,
     config: any, // Aquí viene la config del nodo (incluyendo resourceMapping)
     numberId: string,
     data: any,
+    newSessionData: any
   ): Promise<Record<string, any>> {
-    this.logger.log(`[DYN] Ejecutando dataSourceTrigger: ${trigger}`);
+    this.logger.log(`[DYN] Navegación: ${JSON.stringify(newSessionData)}`);
 
     switch (trigger) {
       case 'fetch_available_dates':
@@ -1355,8 +1361,19 @@ Pago de pensión por $290,000 COP\n`,
         );
         return { date: dates };
 
+      case 'execute_backend_service':
+        this.logger.log(`[DYN] Iniciando ejecución del servicio backend para cotización...`);
+
+        // Aquí llamamos a la lógica que va a consumir tu API de cotizaciones
+        const result = await this._processQuotation(newSessionData, numberId);
+
+        // Retornamos el resultado para que el Flow pueda mostrarlo en la pantalla
+        return { details: result };
+
+
+
       default:
-        this.logger.warn(`[DYN] dataSourceTrigger no reconocido: ${trigger}`);
+        this.logger.warn(`[DYN] dataSourceTrigger no reconocido: ${trigger} `);
         return {};
     }
   }
@@ -1579,13 +1596,52 @@ Pago de pensión por $290,000 COP\n`,
     flow_token: string,
   ): Promise<void> {
     try {
-      // 1. Intentar crear la cita en el calendario si el flujo lo define
-      await this._createCalendarEvent(
-        newSessionData,
-        flowNavigate,
-        numberId,
-        userNumber,
-      );
+      this.logger.log(`[DYN] Ejecutando lógica de fin de flujo para: ${flowJson.name || 'Desconocido'}`);
+
+      // Recuperamos la respuesta completa que guardamos en el paso anterior
+      const fullQuotationResponse = newSessionData.fullQuotationResponse;
+      const rawSelectedPlan = newSessionData['selected_plan'];
+
+      if (fullQuotationResponse && rawSelectedPlan) {
+        this.logger.log(`[DYN] Flujo de Cotización detectado. Plan seleccionado por usuario: ${rawSelectedPlan}`);
+
+        const plansArray = fullQuotationResponse.plans || [];
+        let selectedPlanId: any = null;
+
+        if (plansArray.length > 0) {
+          const normalizeText = (text: string) =>
+            text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace("plan ", "").trim();
+
+          const normalizedSelection = normalizeText(rawSelectedPlan);
+
+          // Buscar el plan exacto dentro del array de planes para sacar su ID
+          for (const plan of plansArray) {
+            const planName = plan.planName || plan.name || '';
+            if (normalizeText(planName) === normalizedSelection) {
+              selectedPlanId = plan.planId !== undefined ? plan.planId : plan.id;
+              break;
+            }
+          }
+
+          if (selectedPlanId !== null) {
+            this.logger.log(`[DYN] Match exitoso. planId extraído: ${selectedPlanId}`);
+            const selectPlanPayload = {
+              ...fullQuotationResponse,
+              selectedPlanId: selectedPlanId
+            };
+            await this.quotationService.selectPlan(selectPlanPayload);
+            this.logger.log(`[DYN] Plan guardado exitosamente en el backend.`);
+          } else {
+            this.logger.warn(`[DYN] No se encontró el ID para el plan seleccionado: ${rawSelectedPlan}`);
+          }
+        } else {
+          this.logger.warn(`[DYN] El array de planes estaba vacío en la respuesta original.`);
+        }
+      }
+      else {
+        // Lógica original de citas
+        await this._createCalendarEvent(newSessionData, flowNavigate, numberId, userNumber);
+      }
 
       // 2. Guardar el resumen final en la base de datos y notificar al socket
       const details = this._buildDynamicDetails(
@@ -1595,14 +1651,14 @@ Pago de pensión por $290,000 COP\n`,
       );
       await this.saveMessage(numberId, userNumber, details);
       this.logger.log(
-        `[DYN] Resumen generado y guardado: ${JSON.stringify(details)}`,
+        `[DYN] Resumen generado y guardado: ${JSON.stringify(details)} `,
       );
       delete this.flowSessions[flow_token];
       this.logger.log(`[DYN] Sesión ${flow_token} finalizada y limpiada.`);
     } catch (e) {
       delete this.flowSessions[flow_token];
       this.logger.error(
-        `[DYN] Error durante la ejecución de fin de flujo: ${e}`,
+        `[DYN] Error durante la ejecución de fin de flujo: ${e} `,
       );
     }
   }
@@ -1710,7 +1766,7 @@ Pago de pensión por $290,000 COP\n`,
           if (foundResource) professionalDisplayName = foundResource.nombre;
 
           this.logger.log(
-            `[DYN] Asignación abierta. Recurso seleccionado al azar: ${selectedProfessionalId}`,
+            `[DYN] Asignación abierta.Recurso seleccionado al azar: ${selectedProfessionalId} `,
           );
         } else {
           this.logger.error(
@@ -1722,7 +1778,7 @@ Pago de pensión por $290,000 COP\n`,
     } else {
       // Sin recursos configurados
       this.logger.log(
-        `[DYN] Agenda General. Guardando como 'any_professional'.`,
+        `[DYN] Agenda General.Guardando como 'any_professional'.`,
       );
       selectedProfessionalId = 'any_professional';
     }
@@ -1734,7 +1790,7 @@ Pago de pensión por $290,000 COP\n`,
     title = title.replace(/\$\{user\.phone\}/g, userNumber);
 
     if (userName) {
-      title += ` - ${userName}`;
+      title += ` - ${userName} `;
     }
 
     if (
@@ -1778,7 +1834,7 @@ Pago de pensión por $290,000 COP\n`,
       );
 
       this.logger.log(
-        `[DYN] Cita guardada. Cliente: ${userName}, Profesional: ${selectedProfessionalId}, Link: ${meetingLink}`,
+        `[DYN] Cita guardada.Cliente: ${userName}, Profesional: ${selectedProfessionalId}, Link: ${meetingLink} `,
       );
     } catch (calendarError) {
       this.logger.error(
@@ -1809,7 +1865,7 @@ Pago de pensión por $290,000 COP\n`,
       if (flowNavigate && flowNavigate[selectedOptionId]) {
         const nextScreenId = flowNavigate[selectedOptionId].pantalla;
         this.logger.log(
-          `[DYN] Navegación por Opción: ${screen} -> ${nextScreenId}`,
+          `[DYN] Navegación por Opción: ${screen} -> ${nextScreenId} `,
         );
         return nextScreenId;
       } else {
@@ -1839,7 +1895,7 @@ Pago de pensión por $290,000 COP\n`,
     const nextScreenId = flowJson.routing_model[screen]?.[0];
     if (nextScreenId) {
       this.logger.log(
-        `[DYN] Navegación por Fallback: ${screen} -> ${nextScreenId}`,
+        `[DYN] Navegación por Fallback: ${screen} -> ${nextScreenId} `,
       );
       return nextScreenId;
     }
@@ -1869,20 +1925,21 @@ Pago de pensión por $290,000 COP\n`,
     // 1. Lógica del Data Source Trigger (ej. 'fetch_available_dates')
     if (screenConfig && screenConfig.dataSourceTrigger) {
       this.logger.log(
-        `[DYN] Pantalla '${nextScreenId}' tiene un dataSourceTrigger: ${screenConfig.dataSourceTrigger}`,
+        `[DYN] Pantalla '${nextScreenId}' tiene un dataSourceTrigger: ${screenConfig.dataSourceTrigger} `,
       );
       nextScreenData = await this._handleDataSourceTrigger(
         screenConfig.dataSourceTrigger,
         screenConfig.config,
         numberId,
         data,
+        newSessionData
       );
     }
 
     // 2. Lógica para preparar 'details' (para pantallas de confirmación)
     if (screenConfig && screenConfig.type === 'confirmationNode') {
       this.logger.log(
-        `[DYN] Generando datos 'details' para MOSTRAR en la pantalla ${nextScreenId}`,
+        `[DYN] Generando datos 'details' para MOSTRAR en la pantalla ${nextScreenId} `,
       );
       const details = this._buildDynamicDetails(
         newSessionData,
@@ -1891,7 +1948,7 @@ Pago de pensión por $290,000 COP\n`,
       );
       detailsData = { details: details };
       this.logger.log(
-        `[DYN] 'details' generados para mostrar: ${JSON.stringify(details)}`,
+        `[DYN] 'details' generados para mostrar: ${JSON.stringify(details)} `,
       );
     }
 
@@ -1917,6 +1974,144 @@ Pago de pensión por $290,000 COP\n`,
         },
       },
     };
+  }
+
+
+  private async _processQuotation(data: any, numberId: string) {
+
+    this.logger.log('Iniciando procesamiento de cotización con data:', data);
+    // Mapeo manual de tus llaves de WhatsApp al DTO de Arriendy
+    const cleanNumber = (val: string | undefined) =>
+      val ? parseInt(val.toString().replace(/\D/g, ''), 10) : 0;
+
+    const isYes = (val: string | undefined) =>
+      val ? val.toString().trim().toLowerCase() === 'si' : false;
+
+    // 2. Mapeo de Cantidad de Inmuebles
+    const mapRentalProperties = (rango: string | undefined): number => {
+      const mapeo: Record<string, number> = {
+        '1 a 5': 1,
+        '6 a 10': 2,
+        '11 a 15': 3,
+        '16 a 20': 4,
+        '21 a 25': 5,
+        '25 o más': 6,
+      };
+      return rango ? mapeo[rango.trim()] || 0 : 0;
+    };
+
+
+    const mapMonthToId = (mesInput: string | undefined): number => {
+      if (!mesInput) return 0;
+
+      const cleanVal = mesInput.toString().trim().toLowerCase();
+
+      // Si por alguna razón ya viene como número en texto ('1', '2', etc.)
+      const parsedNum = parseInt(cleanVal, 10);
+      if (!isNaN(parsedNum) && parsedNum >= 1 && parsedNum <= 12) {
+        return parsedNum;
+      }
+
+      const mesesMap: Record<string, number> = {
+        'enero': 1,
+        'febrero': 2,
+        'marzo': 3,
+        'abril': 4,
+        'mayo': 5,
+        'junio': 6,
+        'julio': 7,
+        'agosto': 8,
+        'septiembre': 9,
+        'octubre': 10,
+        'noviembre': 11,
+        'diciembre': 12,
+      };
+
+      return mesesMap[cleanVal] || 0;
+    };
+
+    const finalFullName = data['NOMBRE COMPLETO']?.trim().substring(0, 100) || '';
+    const finalEmail = data['EMAIL']?.trim().substring(0, 50) || '';
+    const finalRentAmount = cleanNumber(data['VALOR DEL CANON']);
+    const finalContractDuration = cleanNumber(data['DURACIÓN CONTRATO']);
+    const valorAdministracion = cleanNumber(data['VALOR ADMINISTRACION']);
+    const finalMaintenanceFee = valorAdministracion > 0 ? valorAdministracion : 0;
+
+    const faltantes = cleanNumber(data['FALTANTES']);
+    const cantidadInmuebles = data['CANTIDAD INMUEBLES']?.trim();
+    const codigoAsesor = data['CODIGO ASESOR']?.trim();
+
+    const rawMonthValue = data['¿EN QUÉ MES VENCE?'];
+    const monthId = mapMonthToId(rawMonthValue);
+    const isCurrentlyRentedValue = monthId > 0;
+
+
+    const signatureCalculada = Math.trunc(
+      (finalFullName.length * finalEmail.length + (finalRentAmount + finalMaintenanceFee)) * finalContractDuration
+    );
+
+
+    const payload: any = {
+      id: 0,
+      tenantId: 2,
+      channel: 'whatsapp-bot-test',
+      fullName: data['NOMBRE COMPLETO']?.trim().substring(0, 100) || '',
+      phoneNumber: data['TELÉFONO / WHATSAPP']?.replace(/[^\d\s\+\-\(\)]/g, '').substring(0, 20) || '',
+      email: data['EMAIL']?.trim().substring(0, 50) || '',
+
+      isOwner: data['¿QUIEN ERES?']?.trim().toLowerCase() === 'propietario',
+      isNaturalPerson: data['¿ERES PERSONA O EMPRESA?']?.trim().toLowerCase() === 'persona natural',
+      isResidentialDestination: data['¿CUAL ES EL USO DEL INMUEBLE?']?.trim().toLowerCase() === 'residencial',
+      isCurrentlyRented: isCurrentlyRentedValue,
+      ...(isCurrentlyRentedValue && { contractExpirationMonth: monthId }),
+      acceptTerms: true,
+
+      rentAmount: cleanNumber(data['VALOR DEL CANON']),
+      contractDuration: finalContractDuration,
+
+      vatApply: isYes(data['COBERTURA IVA']),
+      homeAssistance: isYes(data['ASISTENCIA DOMICILIARIA']),
+
+      // Administracion
+      maintenanceFeeApply: valorAdministracion > 0,
+      ...(valorAdministracion > 0 && { maintenanceFee: valorAdministracion }),
+
+      // Faltantes
+      damagesMissingApply: faltantes > 0,
+      ...(faltantes > 0 && { damagesMissing: faltantes }),
+
+      // Múltiples inmuebles
+      hasMoreRentProperties: !!cantidadInmuebles,
+      ...(cantidadInmuebles && { howManyMoreRentalProperties: mapRentalProperties(cantidadInmuebles) }),
+
+      // Asesor
+      receivedHelpFromAdvisor: !!codigoAsesor,
+      ...(codigoAsesor && { advisorCode: codigoAsesor }),
+
+      signature: signatureCalculada
+
+      // selectedPlanId: 1 // (Opcional) Descomentar si deseas sugerir un plan específico por defecto
+    };
+
+    this.logger.log(`[COTIZACIÓN] Payload enviado a la API`);
+
+    try {
+      // Llamada real al servicio
+      const apiResponse = await this.quotationService.calculateQuotation(payload);
+
+      // Verificamos que la API haya respondido con el arreglo de planes
+      if (apiResponse && apiResponse.plans && Array.isArray(apiResponse.plans)) {
+        data.fullQuotationResponse = apiResponse;
+        this.logger.log(`[COTIZACIÓN] Respuesta completa guardada en sesión.`);
+        return this.quotationService.formatPlansMessage(apiResponse.plans);
+      } else {
+        throw new Error("La API no devolvió un arreglo válido de planes.");
+      }
+
+    } catch (error) {
+      this.logger.error(`[COTIZACIÓN] Error en el proceso de cotización`, error);
+      return `❌ Ocurrió un error al generar tu cotización. Por favor, intenta de nuevo más tarde o comunícate con un asesor.`;
+    }
   }
 
   @Cron(CronExpression.EVERY_30_MINUTES)

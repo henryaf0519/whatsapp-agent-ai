@@ -21,6 +21,7 @@ import { SocketModule } from './socket/socket.module';
 import { WhatsappTemplatesModule } from './whatsapp-templates/whatsapp-templates.module';
 import { CalendarModule } from './calendar/calendar.module';
 import { CrmModule } from './crm/crm.module';
+import { QuotationModule } from './quotation/quotation.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { CrmModule } from './crm/crm.module';
     WhatsappTemplatesModule,
     CalendarModule,
     CrmModule,
+    QuotationModule,
   ],
   controllers: [
     AppController,
