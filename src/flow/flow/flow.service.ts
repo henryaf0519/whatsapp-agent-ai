@@ -769,11 +769,8 @@ Pago de pensión por $290,000 COP\n`,
 
         if (fieldName === 'date') {
           formattedKey = 'Cita seleccionada';
-        } else if (
-          fieldType === 'RadioButtonsGroup' ||
-          (fieldType === 'Dropdown' && fieldName !== 'date')
-        ) {
-          formattedKey = 'Seleccionaste';
+        } else if (fieldName === 'selected_plan' || fieldName === 'plan') {
+          formattedKey = 'Plan Seleccionado';
         } else if (field.label) {
           formattedKey = field.label.replace(':', '');
         } else {
@@ -781,6 +778,7 @@ Pago de pensión por $290,000 COP\n`,
             .replace(/_/g, ' ')
             .replace(/\b\w/g, (char) => char.toUpperCase());
         }
+
         let readableValue = String(value);
         if (
           readableValue.startsWith('opcion_') ||
@@ -794,6 +792,10 @@ Pago de pensión por $290,000 COP\n`,
           } else {
             continue;
           }
+        }
+
+        if (formattedKey.trim().toLowerCase() === 'selecciona') {
+          continue;
         }
 
         details.push(`${formattedKey}: ${readableValue}`);
@@ -1998,29 +2000,60 @@ Pago de pensión por $290,000 COP\n`,
       return rango ? mapeo[rango.trim()] || 0 : 0;
     };
 
+
+    const mapMonthToId = (mesInput: string | undefined): number => {
+      if (!mesInput) return 0;
+
+      const cleanVal = mesInput.toString().trim().toLowerCase();
+
+      // Si por alguna razón ya viene como número en texto ('1', '2', etc.)
+      const parsedNum = parseInt(cleanVal, 10);
+      if (!isNaN(parsedNum) && parsedNum >= 1 && parsedNum <= 12) {
+        return parsedNum;
+      }
+
+      const mesesMap: Record<string, number> = {
+        'enero': 1,
+        'febrero': 2,
+        'marzo': 3,
+        'abril': 4,
+        'mayo': 5,
+        'junio': 6,
+        'julio': 7,
+        'agosto': 8,
+        'septiembre': 9,
+        'octubre': 10,
+        'noviembre': 11,
+        'diciembre': 12,
+      };
+
+      return mesesMap[cleanVal] || 0;
+    };
+
     const finalFullName = data['NOMBRE COMPLETO']?.trim().substring(0, 100) || '';
     const finalEmail = data['EMAIL']?.trim().substring(0, 50) || '';
     const finalRentAmount = cleanNumber(data['VALOR DEL CANON']);
-    const finalContractDuration = cleanNumber(data['DURACIÓN DEL CONTRATO']);
+    const finalContractDuration = cleanNumber(data['DURACIÓN CONTRATO']);
     const valorAdministracion = cleanNumber(data['VALOR ADMINISTRACION']);
     const finalMaintenanceFee = valorAdministracion > 0 ? valorAdministracion : 0;
 
     const faltantes = cleanNumber(data['FALTANTES']);
     const cantidadInmuebles = data['CANTIDAD INMUEBLES']?.trim();
     const codigoAsesor = data['CODIGO ASESOR']?.trim();
-    // Llamada al endpoint
-    //const response = await axios.post(`${this.quotationBaseUrl} Quotations / calc`, payload);
-    //this.logger.log(`[COTIZACIÓN] API respondió: ${JSON.stringify(response.data)} `);
+
+    const rawMonthValue = data['¿EN QUÉ MES VENCE?'];
+    const monthId = mapMonthToId(rawMonthValue);
+    const isCurrentlyRentedValue = monthId > 0;
+
 
     const signatureCalculada = Math.trunc(
       (finalFullName.length * finalEmail.length + (finalRentAmount + finalMaintenanceFee)) * finalContractDuration
     );
 
-    const isCurrentlyRentedValue = isYes(data['¿El INQUILINO YA HABITA EL INMUEBLE?']);
 
     const payload: any = {
       id: 0,
-      tenantId: 2, // Parametrizar según tu lógica de entorno
+      tenantId: 2,
       channel: 'whatsapp-bot-test',
       fullName: data['NOMBRE COMPLETO']?.trim().substring(0, 100) || '',
       phoneNumber: data['TELÉFONO / WHATSAPP']?.replace(/[^\d\s\+\-\(\)]/g, '').substring(0, 20) || '',
@@ -2029,12 +2062,12 @@ Pago de pensión por $290,000 COP\n`,
       isOwner: data['¿QUIEN ERES?']?.trim().toLowerCase() === 'propietario',
       isNaturalPerson: data['¿ERES PERSONA O EMPRESA?']?.trim().toLowerCase() === 'persona natural',
       isResidentialDestination: data['¿CUAL ES EL USO DEL INMUEBLE?']?.trim().toLowerCase() === 'residencial',
-      isCurrentlyRented: isYes(data['¿El INQUILINO YA HABITA EL INMUEBLE?']),
-      ...(isCurrentlyRentedValue && { contractExpirationMonth: 3 }),
+      isCurrentlyRented: isCurrentlyRentedValue,
+      ...(isCurrentlyRentedValue && { contractExpirationMonth: monthId }),
       acceptTerms: true,
 
       rentAmount: cleanNumber(data['VALOR DEL CANON']),
-      contractDuration: cleanNumber(data['DURACIÓN DEL CONTRATO']),
+      contractDuration: finalContractDuration,
 
       vatApply: isYes(data['COBERTURA IVA']),
       homeAssistance: isYes(data['ASISTENCIA DOMICILIARIA']),

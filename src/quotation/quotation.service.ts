@@ -7,7 +7,7 @@ export class QuotationService {
     private readonly apiUrl = 'https://mikayros.paisasoft.com/api/Quotations';
 
     async calculateQuotation(payload: any): Promise<any> {
-        this.logger.log(`[QuotationService] Enviando petición a la API...`);
+        this.logger.log(`[QuotationService] Enviando petición a la API...`, payload);
         const url = `${this.apiUrl}/calc`;
         try {
             const response = await axios.post(url, payload, {
