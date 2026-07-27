@@ -32,22 +32,7 @@ export class FlowController {
   private readonly logger = new Logger(FlowController.name);
   constructor(private readonly flowService: FlowService) {}
 
-  @Post('webhook')
-  async handleFlowWebhook(@Body() body: any, @Res() res: Response) {
-    this.logger.log('Petición de Flow recibida webhook normal');
 
-    try {
-      const encryptedResponsePayload =
-        await this.flowService.processFlowData(body);
-      res
-        .status(200)
-        .header('Content-Type', 'text/plain')
-        .send(encryptedResponsePayload);
-    } catch (error) {
-      this.logger.error('Error procesando el webhook del Flow', error);
-      res.status(500).send('Error interno del servidor');
-    }
-  }
 
   @Post('webhookPro')
   async handleFlowWebhookPro(@Body() body: any, @Res() res: Response) {
