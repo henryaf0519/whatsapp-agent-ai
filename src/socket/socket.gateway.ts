@@ -24,6 +24,7 @@ export interface MessagePayload {
 const allowedOrigins = [
   'http://localhost:5173',
   'https://orvexia-4f178.web.app',
+  'https://whatsapp.arriendy.com'
 ];
 
 @WebSocketGateway({

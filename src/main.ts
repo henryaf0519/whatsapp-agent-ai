@@ -13,6 +13,7 @@ declare const module: any;
 
 const allowedOrigins = [
   'http://localhost:5173',
+  'https://whatsapp.arriendy.com',
   'https://orvexia-4f178.web.app',
 ];
 

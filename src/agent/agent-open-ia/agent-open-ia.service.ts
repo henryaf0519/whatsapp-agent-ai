@@ -842,8 +842,8 @@ export class AgentOpenIaService implements OnModuleInit {
     const lastMessageTime = userHistory ? new Date(timestamp).getTime() : 0;
     const timeDifference = (currentTime - lastMessageTime) / 1000 / 60;
 
-    if (timeDifference > 800 || !userHistory) {
-      // Si han pasado más de 10 minutos o no hay historial, iniciar nueva conversación
+    if (timeDifference > 2 || !userHistory) {
+      // Si han pasado más de 2 minutos o no hay historial, iniciar nueva conversación
       const updatedUserHistory = `AI: Hola Bienvenido a Afiliamos\n`;
 
       // Guardar el historial actualizado en la base de datos
