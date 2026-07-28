@@ -9,10 +9,13 @@ import { FlowTriggerService } from './flow/flow-trigger.service';
 import { CalendarModule } from 'src/calendar/calendar.module';
 import { QuotationModule } from 'src/quotation/quotation.module';
 import { FlowCryptoService } from './flow/flow-crypto.service';
+import { FlowManagementService } from './flow/flow-management.service';
+import { FlowAppointmentService } from './flow/flow-appointment.service';
+import { FlowQuotationMapperService } from './flow/flow-quotation-mapper.service';
 
 @Module({
   imports: [DatabaseModule, SocketModule, WhatsappModule, CalendarModule, QuotationModule],
   controllers: [FlowController, FlowTriggerController],
-  providers: [FlowService, FlowTriggerService, FlowCryptoService],
+  providers: [FlowService, FlowTriggerService, FlowCryptoService, FlowManagementService, FlowAppointmentService, FlowQuotationMapperService],
 })
 export class FlowModule {}

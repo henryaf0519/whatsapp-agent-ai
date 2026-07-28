@@ -16,9 +16,9 @@ import {
 } from '@nestjs/common';
 import { Response, Request } from 'express';
 import { FlowService } from './flow.service';
-import { AuthGuard } from '@nestjs/passport'; // <--- AÑADIR
+import { FlowManagementService } from './flow-management.service';
+import { AuthGuard } from '@nestjs/passport';
 
-// Definir el tipo para el usuario en el Request
 interface JwtUser {
   userId: string;
   email: string;
@@ -30,36 +30,24 @@ interface JwtUser {
 @Controller('flow')
 export class FlowController {
   private readonly logger = new Logger(FlowController.name);
-  constructor(private readonly flowService: FlowService) {}
 
-
+  constructor(
+    private readonly flowService: FlowService,
+    private readonly flowManagementService: FlowManagementService,
+  ) {}
 
   @Post('webhookPro')
   async handleFlowWebhookPro(@Body() body: any, @Res() res: Response) {
     this.logger.log('Petición de Flow recibida webhookPro');
-
     try {
-      const encryptedResponsePayload =
-        await this.flowService.processDynamicFlowData(body);
-      res
-        .status(200)
-        .header('Content-Type', 'text/plain')
-        .send(encryptedResponsePayload);
+      const encryptedResponsePayload = await this.flowService.processDynamicFlowData(body);
+      res.status(200).header('Content-Type', 'text/plain').send(encryptedResponsePayload);
     } catch (error) {
       this.logger.error('Error procesando el webhook del Flow', error);
       res.status(500).send('Error interno del servidor');
     }
   }
 
-  /*
-  ==========================================================================
-  NUEVOS ENDPOINTS CRUD PARA GESTIÓN DE FLOWS (ADMIN)
-  ==========================================================================
-  */
-
-  /**
-   * 1. Crear un nuevo Flow (vacío)
-   */
   @Post()
   @UseGuards(AuthGuard('jwt'))
   @HttpCode(HttpStatus.CREATED)
@@ -68,42 +56,24 @@ export class FlowController {
     @Body('name') name: string,
     @Body('categories') categories?: string[],
   ) {
-    const { number_id, waba_id } = req.user as {
-      number_id: string;
-      waba_id: string;
-      app_id: string;
-    };
-    return this.flowService.createFlow(waba_id, number_id, name, categories);
+    const { number_id, waba_id } = req.user as { number_id: string; waba_id: string; app_id: string; };
+    return this.flowManagementService.createFlow(waba_id, number_id, name, categories);
   }
 
-  /**
-   * 3. Obtener todos los Flows de la WABA
-   */
   @Get()
   @UseGuards(AuthGuard('jwt'))
   async getFlows(@Req() req: Request) {
-    const { number_id, waba_id } = req.user as {
-      number_id: string;
-      waba_id: string;
-      app_id: string;
-    };
-    return this.flowService.getFlows(waba_id, number_id);
+    const { number_id, waba_id } = req.user as { number_id: string; waba_id: string; app_id: string; };
+    return this.flowManagementService.getFlows(waba_id, number_id);
   }
 
-  /**
-   * 2. Obtener un Flow específico por su ID
-   */
   @Get(':flowId')
   @UseGuards(AuthGuard('jwt'))
   async getFlowById(@Param('flowId') flowId: string, @Req() req: Request) {
     const user = req.user as JwtUser;
-    return this.flowService.getFlowById(flowId, user.number_id);
+    return this.flowManagementService.getFlowById(flowId, user.number_id);
   }
 
-  /**
-   * 4. Actualizar el contenido (JSON) de un Flow
-   * Espera un body como: { "flowJson": "{...}" }
-   */
   @Put(':flowId/assets')
   @UseGuards(AuthGuard('jwt'))
   @HttpCode(HttpStatus.OK)
@@ -114,28 +84,16 @@ export class FlowController {
     @Body('navigationMap') navigation: string,
   ) {
     const user = req.user as JwtUser;
-    return this.flowService.updateFlowAssets(
-      flowId,
-      user.number_id,
-      flowJson,
-      navigation,
-    );
+    return this.flowManagementService.updateFlowAssets(flowId, user.number_id, flowJson, navigation);
   }
 
-  /**
-   * 5. Eliminar un Flow
-   */
   @Delete(':flowId')
   @UseGuards(AuthGuard('jwt'))
   @HttpCode(HttpStatus.OK)
   async deleteFlow(@Param('flowId') flowId: string, @Req() req: Request) {
     const user = req.user as JwtUser;
-    return this.flowService.deleteFlow(flowId, user.number_id);
+    return this.flowManagementService.deleteFlow(flowId, user.number_id);
   }
-
-  /**
-   * 6. Publicar un Flow
-   */
 
   @Post('publish')
   @UseGuards(AuthGuard('jwt'))
@@ -146,9 +104,7 @@ export class FlowController {
     @Body('name') name: string,
   ) {
     const user = req.user as JwtUser;
-
-    // Pasamos todos los parámetros al servicio
-    return this.flowService.publishFlow(flowId, name, user.number_id);
+    return this.flowManagementService.publishFlow(flowId, name, user.number_id);
   }
 
   @Post(':internalFlowId/test')
@@ -161,12 +117,6 @@ export class FlowController {
     @Body('flowName') flowName: string,
   ) {
     const user = req.user as JwtUser;
-    return this.flowService.sendTestFlow(
-      flowId,
-      flowName,
-      to,
-      screen,
-      user.number_id,
-    );
+    return this.flowManagementService.sendTestFlow(flowId, flowName, to, screen, user.number_id);
   }
 }
