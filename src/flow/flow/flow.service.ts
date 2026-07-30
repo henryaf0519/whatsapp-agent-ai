@@ -125,7 +125,7 @@ export class FlowService {
   private _buildDynamicDetails(newSessionData: any, flowNavigate: any, flowJson: any, title?: string): string {
     const details: string[] = [];
     if (title) details.push(title);
-    else details.push('📋 Resumen de tu solicitud:');
+    else details.push('');
 
     const processedFields = new Set<string>();
 
