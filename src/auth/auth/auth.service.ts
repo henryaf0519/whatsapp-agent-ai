@@ -126,6 +126,25 @@ export class AuthService {
     return user;
   }
 
+
+  async getAllUsers(): Promise<any[]> {
+    // Llamamos a la capa de base de datos
+    const users = await this.dynamoService.getAllUsers();
+    
+    // Filtramos la contraseña para no devolverla en la respuesta de la API
+    return users.map(({ password, ...userWithoutPassword }) => userWithoutPassword);
+  }
+
+  async deleteUser(email: string): Promise<{ message: string }> {
+    const user = await this.dynamoService.findUserByEmail(email);
+    if (!user) {
+      throw new UnauthorizedException('El usuario no existe');
+    }
+    
+    await this.dynamoService.deleteUserByEmail(email);
+    return { message: `Usuario con email ${email} eliminado con éxito` };
+  }
+
   /**
    * Orquesta la sincronización de plantillas para un usuario específico.
    * @param wabaId - El ID de la cuenta de WhatsApp Business del usuario.

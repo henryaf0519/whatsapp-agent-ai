@@ -12,6 +12,8 @@ import {
   Req,
   Query,
   Res,
+  Delete,
+  Param,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { AuthGuard } from '@nestjs/passport';
@@ -63,6 +65,17 @@ export class AuthController {
       message: 'Usuario registrado con éxito',
       email: user.email,
     };
+  }
+
+  @Get('users')
+  async getAllUsers() {
+    return await this.authService.getAllUsers();
+  }
+
+  @Delete('users/:email')
+  @HttpCode(HttpStatus.OK)
+  async deleteUser(@Param('email') email: string) {
+    return await this.authService.deleteUser(email);
   }
 
   @Get('profile')

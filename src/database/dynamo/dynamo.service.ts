@@ -912,6 +912,46 @@ export class DynamoService implements OnModuleInit {
     }
   }
 
+
+  async getAllUsers(): Promise<any[]> {
+    const command = new ScanCommand({
+      TableName: 'login',
+    });
+
+    try {
+      const response = await this.docClient.send(command);
+      this.logger.log(`Obtenidos ${response.Items?.length || 0} usuarios de la tabla 'login'.`);
+      return response.Items || [];
+    } catch (error) {
+      this.logger.error(
+        'Error al obtener los usuarios de la tabla login:',
+        error,
+      );
+      throw new Error('No se pudieron obtener los usuarios de la base de datos.');
+    }
+  }
+
+  async deleteUserByEmail(email: string): Promise<any> {
+    const command = new DeleteCommand({
+      TableName: 'login',
+      Key: {
+        email: email,
+      },
+    });
+
+    try {
+      await this.docClient.send(command);
+      this.logger.log(`Usuario ${email} eliminado de la tabla 'login'.`);
+      return { success: true, email };
+    } catch (error) {
+      this.logger.error(
+        `Error al eliminar el usuario ${email} de la tabla login:`,
+        error,
+      );
+      throw new Error('No se pudo eliminar el usuario de la base de datos.');
+    }
+  }
+
   /**
    * Guarda o actualiza un lote de plantillas para una cuenta de WhatsApp específica.
    * @param wabaId - El ID de la cuenta de WhatsApp Business.
